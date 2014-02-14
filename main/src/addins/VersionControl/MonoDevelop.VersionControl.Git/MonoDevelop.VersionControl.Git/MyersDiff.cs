@@ -24,22 +24,22 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 using System;
-using NGit.Api;
 using System.Collections.Generic;
-using NGit.Diff;
-using NGit.Treewalk;
-using NGit.Treewalk.Filter;
-using Sharpen;
-using NGit.Util.IO;
-using NGit;
-using NGit.Api.Errors;
-using NGit.Internal;
-using NGit.Dircache;
+using org.eclipse.jgit.api;
+using org.eclipse.jgit.api.errors;
+using org.eclipse.jgit.diff;
+using org.eclipse.jgit.dircache;
+using org.eclipse.jgit.@internal;
+using org.eclipse.jgit.lib;
+using org.eclipse.jgit.treewalk;
+using org.eclipse.jgit.treewalk.filter;
+using org.eclipse.jgit.util.io;
+
 using System.IO;
 
 namespace MonoDevelop.VersionControl.Git
 {
-	sealed class MyersDiff : GitCommand<IList<DiffEntry>>
+	sealed class MyersDiff : org.eclipse.jgit.api.GitCommand<IList<DiffEntry>>
 	{
 		AbstractTreeIterator oldTree;
 

@@ -28,13 +28,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-using NGit;
-using NGit.Treewalk;
-using NGit.Treewalk.Filter;
+using org.eclipse.jgit.api;
+using org.eclipse.jgit.lib;
+using org.eclipse.jgit.treewalk;
+using org.eclipse.jgit.treewalk.filter;
 
 namespace MonoDevelop.VersionControl.Git
 {
-	class FilteredStatus : NGit.Api.StatusCommand
+	class FilteredStatus : StatusCommand
 	{
 		WorkingTreeIterator iter;
 		IndexDiff diff;
@@ -43,24 +44,24 @@ namespace MonoDevelop.VersionControl.Git
 			get; set;
 		}
 		
-		public FilteredStatus (NGit.Repository repository)
+		public FilteredStatus (org.eclipse.jgit.lib.Repository repository)
 			: base (repository)
 		{
 		}
 		
-		public FilteredStatus (NGit.Repository repository, IEnumerable<string> files)
+		public FilteredStatus (org.eclipse.jgit.lib.Repository repository, IEnumerable<string> files)
 			: base (repository)
 		{
 			Files = files;
 		}
 		
-		public override NGit.Api.StatusCommand SetWorkingTreeIt (WorkingTreeIterator workingTreeIt)
+		public override StatusCommand SetWorkingTreeIt (WorkingTreeIterator workingTreeIt)
 		{
 			iter = workingTreeIt;
 			return this;
 		}
 		
-		public override NGit.Api.Status Call ()
+		public override Status Call ()
 		{
 			if (iter == null)
 				iter = new FileTreeIterator (repo);
@@ -69,16 +70,16 @@ namespace MonoDevelop.VersionControl.Git
 			if (Files != null) {
 				var filters = Files.Where (f => f != ".").ToArray ();
 				if (filters.Length > 0)
-					diff.SetFilter (PathFilterGroup.CreateFromStrings (filters));
+					diff.setFilter (PathFilterGroup.createFromStrings (filters));
 			}
 
-			diff.Diff ();
-			return new NGit.Api.Status (diff);
+			diff.diff ();
+			return new Status (diff);
 		}
 
 		public virtual ICollection<string> GetIgnoredNotInIndex ()
 		{
-			return diff.GetIgnoredNotInIndex ();
+			return diff.getIgnoredNotInIndex ();
 		}
 	}
 }
