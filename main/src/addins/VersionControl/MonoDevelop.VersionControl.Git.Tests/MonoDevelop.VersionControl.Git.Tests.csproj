@@ -3,7 +3,7 @@
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProductVersion>10.0.0</ProductVersion>
+    <ProductVersion>8.0.30703</ProductVersion>
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{F3AC14B0-3D1F-4B9B-95E8-384056060F33}</ProjectGuid>
     <OutputType>Library</OutputType>
@@ -35,6 +35,39 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
+    <Reference Include="IKVM.OpenJDK.Core">
+      <HintPath>..\MonoDevelop.VersionControl.Git\IKVM.OpenJDK.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="jgit">
+      <HintPath>..\MonoDevelop.VersionControl.Git\jgit.dll</HintPath>
+    </Reference>
+    <Reference Include="IKVM.OpenJDK.Security">
+      <HintPath>..\MonoDevelop.VersionControl.Git\IKVM.OpenJDK.Security.dll</HintPath>
+    </Reference>
+    <Reference Include="IKVM.OpenJDK.Text">
+      <HintPath>..\MonoDevelop.VersionControl.Git\IKVM.OpenJDK.Text.dll</HintPath>
+    </Reference>
+    <Reference Include="IKVM.OpenJDK.Util">
+      <HintPath>..\MonoDevelop.VersionControl.Git\IKVM.OpenJDK.Util.dll</HintPath>
+    </Reference>
+    <Reference Include="IKVM.OpenJDK.XML.API">
+      <HintPath>..\MonoDevelop.VersionControl.Git\IKVM.OpenJDK.XML.API.dll</HintPath>
+    </Reference>
+    <Reference Include="IKVM.Runtime.JNI">
+      <HintPath>..\MonoDevelop.VersionControl.Git\IKVM.Runtime.JNI.dll</HintPath>
+    </Reference>
+    <Reference Include="IKVM.Runtime">
+      <HintPath>..\MonoDevelop.VersionControl.Git\IKVM.Runtime.dll</HintPath>
+    </Reference>
+    <Reference Include="IKVM.OpenJDK.Naming">
+      <HintPath>..\MonoDevelop.VersionControl.Git\IKVM.OpenJDK.Naming.dll</HintPath>
+    </Reference>
+    <Reference Include="IKVM.OpenJDK.Management">
+      <HintPath>..\MonoDevelop.VersionControl.Git\IKVM.OpenJDK.Management.dll</HintPath>
+    </Reference>
+    <Reference Include="IKVM.OpenJDK.SwingAWT">
+      <HintPath>..\MonoDevelop.VersionControl.Git\IKVM.OpenJDK.SwingAWT.dll</HintPath>
+    </Reference>
   </ItemGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
   <ItemGroup>
@@ -57,24 +90,6 @@
       <Project>{19DE0F35-D204-4FD8-A553-A19ECE05E24D}</Project>
       <Name>MonoDevelop.VersionControl</Name>
       <Private>False</Private>
-    </ProjectReference>
-    <ProjectReference Include="..\..\..\..\external\ngit\NGit\NGit.csproj">
-      <Project>{E3BFF8B4-189C-496A-A817-7E8B31E22B91}</Project>
-      <Name>NGit</Name>
-      <Private>False</Private>
-    </ProjectReference>
-    <ProjectReference Include="..\..\..\..\external\ngit\NSch\NSch.csproj">
-      <Project>{A19E6F3F-A25B-4B01-8922-CF0CC35C781D}</Project>
-      <Name>NSch</Name>
-      <Private>False</Private>
-    </ProjectReference>
-    <ProjectReference Include="..\..\..\..\external\ngit\Sharpen\Sharpen.csproj">
-      <Project>{72944A6C-45FF-4EF8-B349-8C9CABF519D4}</Project>
-      <Name>Sharpen</Name>
-    </ProjectReference>
-    <ProjectReference Include="..\..\..\..\external\ngit\Sharpen.Unix\Sharpen.Unix.csproj">
-      <Project>{849AE05D-0058-4A8C-A0E8-77DC6BB12E52}</Project>
-      <Name>Sharpen.Unix</Name>
     </ProjectReference>
     <ProjectReference Include="..\..\..\..\external\guiunit\src\framework\GuiUnit_NET_4_0.csproj">
       <Project>{E13A0A7B-4DE6-43ED-A139-41052D065A9B}</Project>

@@ -47,6 +47,33 @@
     <Reference Include="IKVM.OpenJDK.Core">
       <HintPath>IKVM.OpenJDK.Core.dll</HintPath>
     </Reference>
+    <Reference Include="IKVM.OpenJDK.Security">
+      <HintPath>IKVM.OpenJDK.Security.dll</HintPath>
+    </Reference>
+    <Reference Include="IKVM.OpenJDK.Text">
+      <HintPath>IKVM.OpenJDK.Text.dll</HintPath>
+    </Reference>
+    <Reference Include="IKVM.OpenJDK.XML.API">
+      <HintPath>IKVM.OpenJDK.XML.API.dll</HintPath>
+    </Reference>
+    <Reference Include="IKVM.Runtime">
+      <HintPath>IKVM.Runtime.dll</HintPath>
+    </Reference>
+    <Reference Include="IKVM.OpenJDK.Util">
+      <HintPath>IKVM.OpenJDK.Util.dll</HintPath>
+    </Reference>
+    <Reference Include="IKVM.Runtime.JNI">
+      <HintPath>IKVM.Runtime.JNI.dll</HintPath>
+    </Reference>
+    <Reference Include="IKVM.OpenJDK.Management">
+      <HintPath>IKVM.OpenJDK.Management.dll</HintPath>
+    </Reference>
+    <Reference Include="IKVM.OpenJDK.Naming">
+      <HintPath>IKVM.OpenJDK.Naming.dll</HintPath>
+    </Reference>
+    <Reference Include="IKVM.OpenJDK.SwingAWT">
+      <HintPath>IKVM.OpenJDK.SwingAWT.dll</HintPath>
+    </Reference>
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AssemblyInfo.cs" />
