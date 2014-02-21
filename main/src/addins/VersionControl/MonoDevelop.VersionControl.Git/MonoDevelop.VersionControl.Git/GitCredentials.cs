@@ -38,17 +38,17 @@ namespace MonoDevelop.VersionControl.Git
 			get; set;
 		}
 		
-		public override bool IsInteractive ()
+		public override bool isInteractive ()
 		{
 			return true;
 		}
 		
-		public override bool Supports (params CredentialItem[] items)
+		public override bool supports (params CredentialItem[] items)
 		{
 			return true;
 		}
 
-		public override bool Get (URIish uri, params CredentialItem[] items)
+		public override bool get (URIish uri, params CredentialItem[] items)
 		{
 			bool result = false;
 			CredentialItem.Password passwordItem = null;
@@ -85,7 +85,7 @@ namespace MonoDevelop.VersionControl.Git
 			return result;
 		}
 		
-		public override void Reset (URIish uri)
+		public override void reset (URIish uri)
 		{
 			HasReset = true;
 		}

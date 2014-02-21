@@ -39,6 +39,8 @@ using org.eclipse.jgit.transport;
 using org.eclipse.jgit.treewalk;
 using JRepository = org.eclipse.jgit.lib.Repository;
 using System;
+using System.Linq;
+using java.lang;
 
 namespace MonoDevelop.VersionControl.Git
 {
@@ -58,7 +60,7 @@ namespace MonoDevelop.VersionControl.Git
 		public static FilePath FromGitPath (this JRepository repo, string filePath)
 		{
 			filePath = filePath.Replace ('/', Path.DirectorySeparatorChar);
-			return Path.Combine (repo.getWorkTree(), filePath);
+			return Path.Combine (repo.getWorkTree().getAbsolutePath (), filePath);
 		}
 		
 		public static List<string> GetConflictedFiles (JRepository repo)
@@ -70,7 +72,7 @@ namespace MonoDevelop.VersionControl.Git
 			DirCache dc = repo.readDirCache ();
 			treeWalk.addTree (new DirCacheIterator (dc));
 			while (treeWalk.next()) {
-				DirCacheIterator dirCacheIterator = treeWalk.getTree(0, DirCacheIterator.@class);
+				DirCacheIterator dirCacheIterator = (DirCacheIterator)treeWalk.getTree(0, (Class)typeof(DirCacheIterator));
 				var ce = dirCacheIterator.getDirCacheEntry ();
 				if (ce != null && ce.getStage() == 1)
 					list.Add (ce.getPathString());
@@ -81,27 +83,27 @@ namespace MonoDevelop.VersionControl.Git
 		/// <summary>
 		/// Compares two commits and returns a list of files that have changed
 		/// </summary>
-		public static IEnumerable<DiffEntry> CompareCommits (JRepository repo, RevCommit reference, RevCommit compared)
+		public static java.util.List CompareCommits (JRepository repo, RevCommit reference, RevCommit compared)
 		{
-			var changes = new List<DiffEntry>();
+			var changes = new java.util.ArrayList ();
 			if (reference == null && compared == null)
 				return changes;
-			ObjectId refTree = (reference != null ? reference.getTree().getId() : ObjectId.zeroId);
-			ObjectId comparedTree = (compared != null ? compared.getTree().getId() : ObjectId.zeroId);
+			ObjectId refTree = (reference != null ? reference.getTree().getId() : ObjectId.zeroId ());
+			ObjectId comparedTree = (compared != null ? compared.getTree().getId() : ObjectId.zeroId ());
 			return CompareCommits (repo, refTree, comparedTree);
 		}
 		
 		/// <summary>
 		/// Returns a list of files that have changed in a commit
 		/// </summary>
-		public static IEnumerable<DiffEntry> GetCommitChanges (JRepository repo, RevCommit commit)
+		public static java.util.List GetCommitChanges (JRepository repo, RevCommit commit)
 		{
 			var rev = commit.toObjectId ();
-			var prev = repo.resolve (commit.getName () + "^") ?? ObjectId.zeroId;
+			var prev = repo.resolve (commit.getName () + "^") ?? ObjectId.zeroId ();
 			return CompareCommits (repo, rev, prev);
 		}
 		
-		public static IEnumerable<DiffEntry> CompareCommits (JRepository repo, AnyObjectId reference, ObjectId compared)
+		public static java.util.List CompareCommits (JRepository repo, AnyObjectId reference, ObjectId compared)
 		{
 			var diff = new MyersDiff (repo);
 
@@ -109,14 +111,14 @@ namespace MonoDevelop.VersionControl.Git
 			firstTree.reset (repo.newObjectReader (), new RevWalk (repo).parseTree (reference));
 			diff.setNewTree (firstTree);
 			
-			if (compared != ObjectId.zeroId) {
+			if (compared != ObjectId.zeroId ()) {
 				var secondTree = new CanonicalTreeParser ();
 				secondTree.reset (repo.newObjectReader (), new RevWalk (repo).parseTree (compared));
 
-				if (compared != ObjectId.zeroId)
+				if (compared != ObjectId.zeroId ())
 					diff.setOldTree (secondTree);
 			}
-			return diff.call ();
+			return (java.util.List)diff.call ();
 		}
 
 		public static ObjectId CreateCommit (JRepository rep, string message, IList<ObjectId> parents, ObjectId indexTreeId, PersonIdent author, PersonIdent committer)
@@ -129,7 +131,7 @@ namespace MonoDevelop.VersionControl.Git
 					commit.setCommitter (committer);
 					commit.setAuthor (author);
 					commit.setMessage (message);
-					commit.setParentIds (parents);
+					commit.setParentIds (parents.ToArray ());
 					commit.setTreeId (indexTreeId);
 					ObjectId commitId = odi.insert (commit);
 					odi.flush ();
@@ -164,20 +166,10 @@ namespace MonoDevelop.VersionControl.Git
 				ru.setForceUpdate (true);
 				RefUpdate.Result rc = ru.update ();
 	
-				switch (rc) {
-				case RefUpdate.Result.NO_CHANGE:
-				case RefUpdate.Result.NEW:
-				case RefUpdate.Result.FAST_FORWARD:
-				case RefUpdate.Result.FORCED:
-					break;
-				
-				case RefUpdate.Result.REJECTED:
-				case RefUpdate.Result.LOCK_FAILURE:
+				if (rc == RefUpdate.Result.REJECTED || rc == RefUpdate.Result.LOCK_FAILURE)
 					throw new ConcurrentRefUpdateException (JGitText.get ().couldNotLockHEAD, ru.getRef (), rc);
-	
-				default:
+				if (rc != RefUpdate.Result.NO_CHANGE && rc != RefUpdate.Result.NEW && rc != RefUpdate.Result.FAST_FORWARD && rc != RefUpdate.Result.FORCED)
 					throw new JGitInternalException ("Reference update failed: " + rc);
-				}
 				
 				dc = repo.lockDirCache ();
 				RevWalk rw = new RevWalk (repo);
@@ -196,7 +188,7 @@ namespace MonoDevelop.VersionControl.Git
 			return new StashCollection (repo);
 		}
 		
-		public static IEnumerable<DiffEntry> GetChangedFiles (JRepository repo, string refRev)
+		public static java.util.List GetChangedFiles (JRepository repo, string refRev)
 		{
 			// Get a list of files that are different in the target branch
 			RevWalk rw = new RevWalk (repo);
@@ -259,7 +251,7 @@ namespace MonoDevelop.VersionControl.Git
 		public static LocalGitRepository Init (string targetLocalPath, string url)
 		{
 			InitCommand ci = new InitCommand ();
-			ci.setDirectory (targetLocalPath);
+			ci.setDirectory (new java.io.File (targetLocalPath));
 			ci.call ();
 			LocalGitRepository repo = new LocalGitRepository (Path.Combine (targetLocalPath, Constants.DOT_GIT));
 			
@@ -313,10 +305,10 @@ namespace MonoDevelop.VersionControl.Git
 				
 				bool noProblems;
 
-				IDictionary<string, org.eclipse.jgit.merge.MergeResult> lowLevelResults = null;
-				IDictionary<string, ResolveMerger.MergeFailureReason> failingPaths = null;
-				IList<string> modifiedFiles = null;
-				
+				java.util.Map lowLevelResults = null;
+				java.util.Map failingPaths = null;
+				java.util.List modifiedFiles = null;
+
 				ResolveMerger resolveMerger = merger;
 				resolveMerger.setCommitNames(new string[] { "BASE", "HEAD", sourceDisplayName });
 				noProblems = merger.merge(headCommit, srcCommit);
@@ -329,7 +321,7 @@ namespace MonoDevelop.VersionControl.Git
 				
 				if (noProblems)
 				{
-					if (modifiedFiles != null && modifiedFiles.Count == 0) {
+					if (modifiedFiles != null && modifiedFiles.size () == 0) {
 						return new org.eclipse.jgit.api.MergeResult(headCommit, null, new ObjectId[] { headCommit.getId (), srcCommit.getId ()
 								}, org.eclipse.jgit.api.MergeResult.MergeStatus.ALREADY_UP_TO_DATE, MergeStrategy.RESOLVE, null, null);
 					}

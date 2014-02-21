@@ -55,13 +55,13 @@ namespace MonoDevelop.VersionControl.Git
 			Files = files;
 		}
 		
-		public override StatusCommand SetWorkingTreeIt (WorkingTreeIterator workingTreeIt)
+		public override StatusCommand setWorkingTreeIt (WorkingTreeIterator workingTreeIt)
 		{
 			iter = workingTreeIt;
 			return this;
 		}
 		
-		public override Status Call ()
+		public override Status call ()
 		{
 			if (iter == null)
 				iter = new FileTreeIterator (repo);
@@ -77,7 +77,7 @@ namespace MonoDevelop.VersionControl.Git
 			return new Status (diff);
 		}
 
-		public virtual ICollection<string> GetIgnoredNotInIndex ()
+		public virtual java.util.Set getIgnoredNotInIndex ()
 		{
 			return diff.getIgnoredNotInIndex ();
 		}

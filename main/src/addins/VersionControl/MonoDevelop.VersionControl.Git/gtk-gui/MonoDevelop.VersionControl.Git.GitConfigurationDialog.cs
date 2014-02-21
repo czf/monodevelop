@@ -183,7 +183,7 @@ namespace MonoDevelop.VersionControl.Git
 			this.buttonPushTag.CanFocus = true;
 			this.buttonPushTag.Name = "buttonPushTag";
 			this.buttonPushTag.UseUnderline = true;
-			this.buttonPushTag.Label = global::Mono.Unix.Catalog.GetString ("_Push");
+			this.buttonPushTag.Label = global::Mono.Unix.Catalog.GetString ("_Push All Tags");
 			this.vbox7.Add (this.buttonPushTag);
 			global::Gtk.Box.BoxChild w14 = ((global::Gtk.Box.BoxChild)(this.vbox7 [this.buttonPushTag]));
 			w14.Position = 1;
@@ -347,8 +347,6 @@ namespace MonoDevelop.VersionControl.Git
 			this.buttonRemoveBranch.Clicked += new global::System.EventHandler (this.OnButtonRemoveBranchClicked);
 			this.buttonSetDefaultBranch.Clicked += new global::System.EventHandler (this.OnButtonSetDefaultBranchClicked);
 			this.buttonAddTag.Clicked += new global::System.EventHandler (this.OnButtonNewTagClicked);
-			this.buttonPushTag.Clicked += new global::System.EventHandler (this.OnButtonPushTagClicked);
-			this.buttonRemoveTag.Clicked += new global::System.EventHandler (this.OnButtonRemoveTagClicked);
 			this.buttonAddRemote.Clicked += new global::System.EventHandler (this.OnButtonAddRemoteClicked);
 			this.buttonEditRemote.Clicked += new global::System.EventHandler (this.OnButtonEditRemoteClicked);
 			this.buttonRemoveRemote.Clicked += new global::System.EventHandler (this.OnButtonRemoveRemoteClicked);

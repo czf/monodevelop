@@ -11,9 +11,6 @@ namespace MonoDevelop.VersionControl.Git
 		private global::Gtk.VBox vbox6;
 		private global::Gtk.Label label2;
 		private global::Gtk.Entry emailEntry;
-		private global::Gtk.VBox vbox4;
-		private global::Gtk.RadioButton globalConfigRadio;
-		private global::Gtk.RadioButton repoConfigRadio;
 		private global::Gtk.Button buttonCancel;
 		private global::Gtk.Button buttonOk;
 
@@ -89,50 +86,17 @@ namespace MonoDevelop.VersionControl.Git
 			w7.Position = 1;
 			w7.Expand = false;
 			w7.Fill = false;
-			// Container child vbox2.Gtk.Box+BoxChild
-			this.vbox4 = new global::Gtk.VBox ();
-			this.vbox4.Name = "vbox4";
-			this.vbox4.Spacing = 6;
-			// Container child vbox4.Gtk.Box+BoxChild
-			this.globalConfigRadio = new global::Gtk.RadioButton (global::Mono.Unix.Catalog.GetString ("Global Config (Recommended)"));
-			this.globalConfigRadio.CanFocus = true;
-			this.globalConfigRadio.Name = "globalConfigRadio";
-			this.globalConfigRadio.DrawIndicator = true;
-			this.globalConfigRadio.UseUnderline = true;
-			this.globalConfigRadio.Group = new global::GLib.SList (global::System.IntPtr.Zero);
-			this.vbox4.Add (this.globalConfigRadio);
-			global::Gtk.Box.BoxChild w8 = ((global::Gtk.Box.BoxChild)(this.vbox4 [this.globalConfigRadio]));
+			w1.Add (this.vbox2);
+			global::Gtk.Box.BoxChild w8 = ((global::Gtk.Box.BoxChild)(w1 [this.vbox2]));
 			w8.Position = 0;
 			w8.Expand = false;
 			w8.Fill = false;
-			// Container child vbox4.Gtk.Box+BoxChild
-			this.repoConfigRadio = new global::Gtk.RadioButton (global::Mono.Unix.Catalog.GetString ("Repository Config"));
-			this.repoConfigRadio.CanFocus = true;
-			this.repoConfigRadio.Name = "repoConfigRadio";
-			this.repoConfigRadio.DrawIndicator = true;
-			this.repoConfigRadio.UseUnderline = true;
-			this.repoConfigRadio.Group = this.globalConfigRadio.Group;
-			this.vbox4.Add (this.repoConfigRadio);
-			global::Gtk.Box.BoxChild w9 = ((global::Gtk.Box.BoxChild)(this.vbox4 [this.repoConfigRadio]));
-			w9.Position = 1;
-			w9.Expand = false;
-			w9.Fill = false;
-			this.vbox2.Add (this.vbox4);
-			global::Gtk.Box.BoxChild w10 = ((global::Gtk.Box.BoxChild)(this.vbox2 [this.vbox4]));
-			w10.Position = 2;
-			w10.Expand = false;
-			w10.Fill = false;
-			w1.Add (this.vbox2);
-			global::Gtk.Box.BoxChild w11 = ((global::Gtk.Box.BoxChild)(w1 [this.vbox2]));
-			w11.Position = 0;
-			w11.Expand = false;
-			w11.Fill = false;
 			// Internal child MonoDevelop.VersionControl.Git.UserGitConfigDialog.ActionArea
-			global::Gtk.HButtonBox w12 = this.ActionArea;
-			w12.Name = "dialog1_ActionArea";
-			w12.Spacing = 10;
-			w12.BorderWidth = ((uint)(5));
-			w12.LayoutStyle = ((global::Gtk.ButtonBoxStyle)(4));
+			global::Gtk.HButtonBox w9 = this.ActionArea;
+			w9.Name = "dialog1_ActionArea";
+			w9.Spacing = 10;
+			w9.BorderWidth = ((uint)(5));
+			w9.LayoutStyle = ((global::Gtk.ButtonBoxStyle)(4));
 			// Container child dialog1_ActionArea.Gtk.ButtonBox+ButtonBoxChild
 			this.buttonCancel = new global::Gtk.Button ();
 			this.buttonCancel.CanDefault = true;
@@ -142,9 +106,9 @@ namespace MonoDevelop.VersionControl.Git
 			this.buttonCancel.UseUnderline = true;
 			this.buttonCancel.Label = "gtk-cancel";
 			this.AddActionWidget (this.buttonCancel, -6);
-			global::Gtk.ButtonBox.ButtonBoxChild w13 = ((global::Gtk.ButtonBox.ButtonBoxChild)(w12 [this.buttonCancel]));
-			w13.Expand = false;
-			w13.Fill = false;
+			global::Gtk.ButtonBox.ButtonBoxChild w10 = ((global::Gtk.ButtonBox.ButtonBoxChild)(w9 [this.buttonCancel]));
+			w10.Expand = false;
+			w10.Fill = false;
 			// Container child dialog1_ActionArea.Gtk.ButtonBox+ButtonBoxChild
 			this.buttonOk = new global::Gtk.Button ();
 			this.buttonOk.CanDefault = true;
@@ -154,15 +118,15 @@ namespace MonoDevelop.VersionControl.Git
 			this.buttonOk.UseUnderline = true;
 			this.buttonOk.Label = "gtk-ok";
 			this.AddActionWidget (this.buttonOk, -5);
-			global::Gtk.ButtonBox.ButtonBoxChild w14 = ((global::Gtk.ButtonBox.ButtonBoxChild)(w12 [this.buttonOk]));
-			w14.Position = 1;
-			w14.Expand = false;
-			w14.Fill = false;
+			global::Gtk.ButtonBox.ButtonBoxChild w11 = ((global::Gtk.ButtonBox.ButtonBoxChild)(w9 [this.buttonOk]));
+			w11.Position = 1;
+			w11.Expand = false;
+			w11.Fill = false;
 			if ((this.Child != null)) {
 				this.Child.ShowAll ();
 			}
 			this.DefaultWidth = 400;
-			this.DefaultHeight = 240;
+			this.DefaultHeight = 184;
 			this.Show ();
 			this.usernameEntry.Changed += new global::System.EventHandler (this.OnChanged);
 			this.emailEntry.Changed += new global::System.EventHandler (this.OnChanged);

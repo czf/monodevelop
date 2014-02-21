@@ -170,11 +170,17 @@ namespace MonoDevelop.VersionControl.Git
 				var submoduleWriteTime = File.GetLastWriteTimeUtc(RootPath.Combine(".gitmodule"));
 				if (cachedSubmoduleTime != submoduleWriteTime) {
 					cachedSubmoduleTime = submoduleWriteTime;
-					cachedSubmodules = new org.eclipse.jgit.api.Git (RootRepository)
+					var submoduleStatus = new org.eclipse.jgit.api.Git (RootRepository)
 						.submoduleStatus ()
-						.call ()
-						.Select(s => Tuple.Create ((FilePath) s.Key, SubmoduleWalk.getSubmoduleRepository (RootRepository, s.Key)))
-						.ToArray ();
+						.call ();
+
+					var list = new List<string> (submoduleStatus.size ());
+					var iterator = submoduleStatus.keySet ().iterator ();
+					while (iterator.hasNext ())
+						list.Add ((string)iterator.next ());
+
+					cachedSubmodules = list.Select (
+						s => Tuple.Create ((FilePath)s, SubmoduleWalk.getSubmoduleRepository (RootRepository, s))).ToArray ();
 				}
 				return cachedSubmodules;
 			}
@@ -206,12 +212,13 @@ namespace MonoDevelop.VersionControl.Git
 			RevWalk walk = new RevWalk (repository);
 			string path = repository.ToGitPath (localFile);
 			if (path != ".")
-				walk.setTreeFilter (FollowFilter.create (path));
+				walk.setTreeFilter (FollowFilter.create (path, (DiffConfig)repository.getConfig ().get (DiffConfig.KEY)));
 			walk.markStart (hc);
 			
 			foreach (RevCommit commit in walk) {
 				PersonIdent author = commit.getAuthorIdent ();
-				GitRevision rev = new GitRevision (this, repository, commit.getId().getName(), author.getWhen().ToLocalTime (), author.getName (), commit.getFullMessage ());
+				var dt = new DateTime (author.getWhen ().getTime ());
+				GitRevision rev = new GitRevision (this, repository, commit.getId().getName(), dt.ToLocalTime (), author.getName (), commit.getFullMessage ());
 				rev.Email = author.getEmailAddress ();
 				rev.ShortMessage = commit.getShortMessage ();
 				rev.Commit = commit;
@@ -228,7 +235,9 @@ namespace MonoDevelop.VersionControl.Git
 				return new RevisionPath [0];
 
 			List<RevisionPath> paths = new List<RevisionPath> ();
-			foreach (var entry in GitUtil.GetCommitChanges (rev.GitRepository, rev.Commit)) {
+			var li = GitUtil.GetCommitChanges (rev.GitRepository, rev.Commit).listIterator ();
+			while (li.hasNext ()) {
+				var entry = (DiffEntry)li.next ();
 				if (entry.getChangeType () == DiffEntry.ChangeType.ADD)
 					paths.Add (new RevisionPath (rev.GitRepository.FromGitPath (entry.getNewPath ()), RevisionAction.Add, null));
 				if (entry.getChangeType () == DiffEntry.ChangeType.DELETE)
@@ -343,10 +352,12 @@ namespace MonoDevelop.VersionControl.Git
 		static void GetDirectoryVersionInfoCore (JRepository repository, GitRevision rev, IEnumerable<FilePath> localPaths, HashSet<FilePath> existingFiles, HashSet<FilePath> nonVersionedMissingFiles, List<VersionInfo> versions)
 		{
 			var filteredStatus = new FilteredStatus (repository, repository.ToGitPath (localPaths));
-			var status = filteredStatus.Call ();
+			var status = filteredStatus.call ();
 			HashSet<string> added = new HashSet<string> ();
-			Action<IEnumerable<string>, VersionStatus> AddFiles = delegate (IEnumerable<string> files, VersionStatus fstatus) {
-				foreach (string file in files) {
+			Action<java.util.Set, VersionStatus> AddFiles = delegate (java.util.Set files, VersionStatus fstatus) {
+				var iterator = files.iterator ();
+				while (iterator.hasNext ()) {
+					string file = (string)iterator.next();
 					if (!added.Add (file))
 						continue;
 					FilePath statFile = repository.FromGitPath (file);
@@ -363,7 +374,7 @@ namespace MonoDevelop.VersionControl.Git
 			AddFiles (status.getMissing (), VersionStatus.Versioned | VersionStatus.ScheduledDelete);
 			AddFiles (status.getConflicting (), VersionStatus.Versioned | VersionStatus.Conflicted);
 			AddFiles (status.getUntracked (), VersionStatus.Unversioned);
-			AddFiles (filteredStatus.GetIgnoredNotInIndex (), VersionStatus.Ignored);
+			AddFiles (filteredStatus.getIgnoredNotInIndex (), VersionStatus.Ignored);
 		}
 		
 		protected override VersionControlOperation GetSupportedOperations (VersionInfo vinfo)
@@ -397,7 +408,7 @@ namespace MonoDevelop.VersionControl.Git
 			var git = new org.eclipse.jgit.api.Git (RootRepository);
 			try {
 				var refs = git.fetch ().call ().getAdvertisedRefs ();
-				if (refs.Count > 0) {
+				if (refs.size () > 0) {
 					throw new UserException ("The remote repository already contains branches. Publishing is only possible to an empty repository");
 				}
 			} catch {
@@ -406,8 +417,8 @@ namespace MonoDevelop.VersionControl.Git
 				} catch {
 				
 				}
-				if (Directory.Exists (RootRepository.getDirectory ()))
-					Directory.Delete (RootRepository.getDirectory (), true);
+				if (Directory.Exists (RootRepository.getDirectory ().getAbsolutePath ()))
+					Directory.Delete (RootRepository.getDirectory ().getAbsolutePath (), true);
 				RootRepository = null;
 				throw;
 			}
@@ -655,7 +666,7 @@ namespace MonoDevelop.VersionControl.Git
 
 		public void Merge (string branch, GitUpdateOptions options, IProgressMonitor monitor)
 		{
-			IEnumerable<DiffEntry> statusList = null;
+			java.util.List statusList = null;
 			Stash stash = null;
 			StashCollection stashes = GetStashes (RootRepository);
 			var git = new org.eclipse.jgit.api.Git (RootRepository);
@@ -719,7 +730,9 @@ namespace MonoDevelop.VersionControl.Git
 					var conflicts = mergeResult.getConflicts ();
 					bool commit = true;
 					if (conflicts != null) {
-						foreach (string conflictFile in conflicts.Keys) {
+						var it = conflicts.keySet ().iterator ();
+						while (it.hasNext ()) {
+							string conflictFile = (string)it.next ();
 							ConflictResult res = ResolveConflict (RootRepository.FromGitPath (conflictFile));
 							if (res == ConflictResult.Abort) {
 								GitUtil.HardReset (RootRepository, GetHeadCommit (RootRepository));
@@ -758,10 +771,15 @@ namespace MonoDevelop.VersionControl.Git
 				}
 				monitor.EndTask ();
 			}
-			
+
+			var list = new List<DiffEntry> (statusList.size ());
+			var iterator = statusList.listIterator ();
+			while (iterator.hasNext ())
+				list.Add ((DiffEntry)iterator.next ());
+
 			// Notify changes
 			if (statusList != null)
-				NotifyFileChanges (monitor, statusList);
+				NotifyFileChanges (monitor, list);
 		}
 
 		static ConflictResult ResolveConflict (string file)
@@ -829,8 +847,8 @@ namespace MonoDevelop.VersionControl.Git
 		
 		IEnumerable<string> GetDirectoryFiles (DirectoryInfo dir)
 		{
-			FileTreeIterator iter = new FileTreeIterator (dir.FullName, RootRepository.getFS (),
-				WorkingTreeOptions.KEY.parse(RootRepository.getConfig()));
+			FileTreeIterator iter = new FileTreeIterator (new java.io.File (dir.FullName), RootRepository.getFS (),
+				(WorkingTreeOptions)WorkingTreeOptions.KEY.parse(RootRepository.getConfig()));
 			while (!iter.eof()) {
 				var file = iter.getEntryFile ();
 				if (file != null && !iter.isEntryIgnored ())
@@ -866,7 +884,7 @@ namespace MonoDevelop.VersionControl.Git
 			cmd.setURI (Url);
 			cmd.setRemote ("origin");
 			cmd.setBranch ("refs/heads/master");
-			cmd.setDirectory ((string)targetLocalPath);
+			cmd.setDirectory (new java.io.File (targetLocalPath));
 			cmd.setCloneSubmodules (true);
 			using (var gm = new GitMonitor (monitor, 4)) {
 				cmd.setProgressMonitor (gm);
@@ -949,7 +967,7 @@ namespace MonoDevelop.VersionControl.Git
 							e.setFileMode (r.getFileMode (0));
 							if (!Directory.Exists (Path.GetDirectoryName (rpath)))
 								Directory.CreateDirectory (rpath);
-							DirCacheCheckout.checkoutEntry (repository, rpath, e);
+							DirCacheCheckout.checkoutEntry (repository, new java.io.File (rpath), e);
 							builder.add (e);
 							changedFiles.Add (rpath);
 						} while (r.next ());
@@ -1008,9 +1026,12 @@ namespace MonoDevelop.VersionControl.Git
 				monitor.ReportSuccess (GettextCatalog.GetString ("Revision {0} successfully reverted", gitRev));
 			} else {
 				var errorMessage = GettextCatalog.GetString ("Could not revert commit {0}", gitRev);
-				var description = GettextCatalog.GetString ("The following files had merge conflicts");
-				description += Environment.NewLine + string.Join (Environment.NewLine, revertResult.getFailingPaths ().Keys);
-				monitor.ReportError (errorMessage, new UserException (errorMessage, description));
+				var description = new StringBuilder (GettextCatalog.GetString ("The following files had merge conflicts")).AppendLine ();
+				var iterator = revertResult.getFailingPaths ().keySet ().iterator ();
+				while (iterator.hasNext ())
+					description.AppendLine ((string)iterator.next ());
+
+				monitor.ReportError (errorMessage, new UserException (errorMessage, description.ToString ()));
 			} 
 		}
 
@@ -1104,7 +1125,7 @@ namespace MonoDevelop.VersionControl.Git
 				var files = group;
 
 				var git = new org.eclipse.jgit.api.Git (repository);
-				RmCommand rm = git.Rm ();
+				RmCommand rm = git.rm ();
 				foreach (var f in files) {
 					// Create backups.
 					if (keepLocal) {
@@ -1188,7 +1209,7 @@ namespace MonoDevelop.VersionControl.Git
 		byte[] GetCommitContent (RevCommit c, FilePath file)
 		{
 			var repository = GetRepository (file);
-			TreeWalk tw = TreeWalk.forPath (repository, repository.ToGitPath (file), c.Tree);
+			TreeWalk tw = TreeWalk.forPath (repository, repository.ToGitPath (file), c.getTree ());
 			if (tw == null)
 				return EmptyContent;
 			ObjectId id = tw.getObjectId (0);
@@ -1221,10 +1242,10 @@ namespace MonoDevelop.VersionControl.Git
 
 			var edits = DiffAlgorithm.getAlgorithm (DiffAlgorithm.SupportedAlgorithm.MYERS)
 					.diff (RawTextComparator.DEFAULT, text1, text2);
-			MemoryStream s = new MemoryStream ();
+			var s = new java.io.ByteArrayOutputStream ();
 			var formatter = new DiffFormatter (s);
 			formatter.format (edits, text1, text2);
-			return Encoding.UTF8.GetString (s.ToArray ());
+			return Encoding.UTF8.GetString (s.toByteArray ());
 		}
 
 		DiffInfo[] GetUnifiedDiffInfo (string diffContent, FilePath basePath, FilePath[] localPaths)
@@ -1270,7 +1291,7 @@ namespace MonoDevelop.VersionControl.Git
 		public void Push (IProgressMonitor monitor, string remote, string remoteBranch)
 		{
 			string remoteRef = "refs/heads/" + remoteBranch;
-			IEnumerable<PushResult> res;
+			java.lang.Iterable res;
 
 			var push = new org.eclipse.jgit.api.Git (RootRepository).push ();
 
@@ -1281,26 +1302,29 @@ namespace MonoDevelop.VersionControl.Git
 				res = push.call ();
 			}
 
-			foreach (var pr in res) {
+			var iterator = res.iterator ();
+			while (iterator.hasNext ()) {
+				var pr = (PushResult)iterator.next ();
 				var remoteUpdate = pr.getRemoteUpdate (remoteRef);
 
-				switch (remoteUpdate.getStatus ()) {
-					case RemoteRefUpdate.Status.UP_TO_DATE: monitor.ReportSuccess (GettextCatalog.GetString ("Remote branch is up to date.")); break;
-					case RemoteRefUpdate.Status.REJECTED_NODELETE: monitor.ReportError (GettextCatalog.GetString ("The server is configured to deny deletion of the branch"), null); break;
-					case RemoteRefUpdate.Status.REJECTED_NONFASTFORWARD: monitor.ReportError (GettextCatalog.GetString ("The update is a non-fast-forward update. Merge the remote changes before pushing again."), null); break;
-					case RemoteRefUpdate.Status.OK:
-						monitor.ReportSuccess (GettextCatalog.GetString ("Push operation successfully completed."));
-						// Update the remote branch
-						ObjectId headId = remoteUpdate.getNewObjectId ();
-						RefUpdate updateRef = RootRepository.updateRef (Constants.R_REMOTES + remote + "/" + remoteBranch);
-						updateRef.setNewObjectId(headId);
-						updateRef.update();
-						break;
-					default:
-						string msg = remoteUpdate.getMessage ();
-						msg = !string.IsNullOrEmpty (msg) ? msg : GettextCatalog.GetString ("Push operation failed");
-						monitor.ReportError (msg, null);
-						break;
+				var status = remoteUpdate.getStatus ();
+				if (status == RemoteRefUpdate.Status.UP_TO_DATE)
+					monitor.ReportSuccess (GettextCatalog.GetString ("Remote branch is up to date."));
+				else if (status == RemoteRefUpdate.Status.REJECTED_NODELETE)
+					monitor.ReportError (GettextCatalog.GetString ("The server is configured to deny deletion of the branch"), null);
+				else if (status == RemoteRefUpdate.Status.REJECTED_NONFASTFORWARD)
+					monitor.ReportError (GettextCatalog.GetString ("The update is a non-fast-forward update. Merge the remote changes before pushing again."), null);
+				else if (status == RemoteRefUpdate.Status.OK) {
+					monitor.ReportSuccess (GettextCatalog.GetString ("Push operation successfully completed."));
+					// Update the remote branch
+					ObjectId headId = remoteUpdate.getNewObjectId ();
+					RefUpdate updateRef = RootRepository.updateRef (Constants.R_REMOTES + remote + "/" + remoteBranch);
+					updateRef.setNewObjectId(headId);
+					updateRef.update();
+				} else {
+					string msg = remoteUpdate.getMessage ();
+					msg = !string.IsNullOrEmpty (msg) ? msg : GettextCatalog.GetString ("Push operation failed");
+					monitor.ReportError (msg, null);
 				}
 			}
 		}
@@ -1343,8 +1367,9 @@ namespace MonoDevelop.VersionControl.Git
 		public IEnumerable<RemoteSource> GetRemotes ()
 		{
 			StoredConfig cfg = RootRepository.getConfig ();
-			foreach (RemoteConfig rc in RemoteConfig.getAllRemoteConfigs (cfg))
-				yield return new RemoteSource (cfg, rc);
+			var iterator = RemoteConfig.getAllRemoteConfigs (cfg).listIterator ();
+			while (iterator.hasNext ())
+				yield return new RemoteSource (cfg, (RemoteConfig)iterator.next ());
 		}
 		
 		public bool IsBranchMerged (string branchName)
@@ -1362,11 +1387,14 @@ namespace MonoDevelop.VersionControl.Git
 		public void RenameRemote (string name, string newName)
 		{
 			StoredConfig cfg = RootRepository.getConfig ();
+			// TODO
+			/*
 			RemoteConfig rem = RemoteConfig.getAllRemoteConfigs (cfg).FirstOrDefault (r => r.getName() == name);
 			if (rem != null) {
-				rem.Name = newName;
+				// Missing setName
+				//rem.Name = newName;
 				rem.update (cfg);
-			}
+			}*/
 		}
 
 		public void AddRemote (RemoteSource remote, bool importTags)
@@ -1397,17 +1425,20 @@ namespace MonoDevelop.VersionControl.Git
 		public void RemoveRemote (string name)
 		{
 			StoredConfig cfg = RootRepository.getConfig ();
-			RemoteConfig rem = RemoteConfig.getAllRemoteConfigs (cfg).FirstOrDefault (r => r.getName() == name);
+			// TODO
+			/*RemoteConfig rem = RemoteConfig.getAllRemoteConfigs (cfg).FirstOrDefault (r => r.getName() == name);
 			if (rem != null) {
 				cfg.unsetSection ("remote", name);
 				cfg.save ();
-			}
+			}*/
 		}
 
 		public IEnumerable<Branch> GetBranches ()
 		{
-			var list = new org.eclipse.jgit.api.Git (RootRepository).branchList ().setListMode (ListBranchCommand.ListMode.HEAD);
-			foreach (var item in list.call ()) {
+			var list = new org.eclipse.jgit.api.Git (RootRepository).branchList ().setListMode (null);
+			var iterator = list.call ().listIterator ();
+			while (iterator.hasNext ()) {
+				var item = (Ref)iterator.next ();
 				string name = JRepository.shortenRefName (item.getName ());
 				Branch br = new Branch ();
 				br.Name = name;
@@ -1419,7 +1450,9 @@ namespace MonoDevelop.VersionControl.Git
 		public IEnumerable<string> GetTags ()
 		{
 			var list = new org.eclipse.jgit.api.Git (RootRepository).tagList ();
-			foreach (var item in list.call ()) {
+			var iterator = list.call ().listIterator ();
+			while (iterator.hasNext ()) {
+				var item = (Ref)iterator.next ();
 				string name = JRepository.shortenRefName (item.getName ());
 				yield return name;
 			}
@@ -1450,7 +1483,9 @@ namespace MonoDevelop.VersionControl.Git
 		public IEnumerable<string> GetRemoteBranches (string remoteName)
 		{
 			var list = new org.eclipse.jgit.api.Git (RootRepository).branchList ().setListMode (ListBranchCommand.ListMode.REMOTE);
-			foreach (var item in list.call ()) {
+			var iterator = list.call ().listIterator ();
+			while (iterator.hasNext ()) {
+				var item = (Ref)iterator.next ();
 				string name = JRepository.shortenRefName (item.getName ());
 				if (name.StartsWith (remoteName + "/", StringComparison.Ordinal))
 					yield return name.Substring (remoteName.Length + 1);
@@ -1467,8 +1502,7 @@ namespace MonoDevelop.VersionControl.Git
 			monitor.BeginTask (GettextCatalog.GetString ("Switching to branch {0}", branch), GitService.StashUnstashWhenSwitchingBranches ? 4 : 2);
 			
 			// Get a list of files that are different in the target branch
-			IEnumerable<DiffEntry> statusList = GitUtil.GetChangedFiles (RootRepository, branch);
-			
+			java.util.List statusList = GitUtil.GetChangedFiles (RootRepository, branch);
 			StashCollection stashes = null;
 			Stash stash = null;
 			
@@ -1507,9 +1541,13 @@ namespace MonoDevelop.VersionControl.Git
 					monitor.Step (1);
 				}
 			}
+
 			// Notify file changes
-			
-			NotifyFileChanges (monitor, statusList);
+			var list = new List<DiffEntry> (statusList.size ());
+			var iterator = statusList.listIterator ();
+			while (iterator.hasNext ())
+				list.Add ((DiffEntry)iterator.next ());
+			NotifyFileChanges (monitor, list);
 			
 			if (BranchSelectionChanged != null)
 				BranchSelectionChanged (this, EventArgs.Empty);
@@ -1567,20 +1605,18 @@ namespace MonoDevelop.VersionControl.Git
 			RevWalk	rw = new RevWalk (RootRepository);
 			RevCommit c1 = rw.parseCommit (cid1);
 			RevCommit c2 = rw.parseCommit (cid2);
-			
-			foreach (var change in GitUtil.CompareCommits (RootRepository, c2, c1)) {
+
+			var li = GitUtil.CompareCommits (RootRepository, c2, c1).listIterator ();
+			while (li.hasNext ()) {
+				var change = (DiffEntry)li.next ();
 				VersionStatus status;
-				switch (change.getChangeType ()) {
-				case DiffEntry.ChangeType.ADD:
+				var type = change.getChangeType ();
+				if (type == DiffEntry.ChangeType.ADD)
 					status = VersionStatus.ScheduledAdd;
-					break;
-				case DiffEntry.ChangeType.DELETE:
+				else if (type == DiffEntry.ChangeType.DELETE)
 					status = VersionStatus.ScheduledDelete;
-					break;
-				default:
+				else
 					status = VersionStatus.Modified;
-					break;
-				}
 				VersionInfo vi = new VersionInfo (RootRepository.FromGitPath (change.getNewPath ()), "", false, status | VersionStatus.Versioned, null, VersionStatus.Versioned, null);
 				cset.AddFile (vi);
 			}
@@ -1596,19 +1632,18 @@ namespace MonoDevelop.VersionControl.Git
 			RevCommit c2 = rw.parseCommit (cid2);
 			
 			List<DiffInfo> diffs = new List<DiffInfo> ();
-			foreach (var change in GitUtil.CompareCommits (RootRepository, c2, c1)) {
+			var li = GitUtil.CompareCommits (RootRepository, c2, c1).listIterator ();
+			while (li.hasNext ()) {
+				var change = (DiffEntry)li.next ();
 				string diff;
-				switch (change.getChangeType ()) {
-				case DiffEntry.ChangeType.DELETE:
+				var type = change.getChangeType ();
+
+				if (type == DiffEntry.ChangeType.DELETE)
 					diff = GenerateDiff (EmptyContent, GetCommitContent (c2, change.getOldPath ()));
-					break;
-				case DiffEntry.ChangeType.ADD:
+				else if (type == DiffEntry.ChangeType.ADD)
 					diff = GenerateDiff (GetCommitContent (c1, change.getNewPath ()), EmptyContent);
-					break;
-				default:
+				else
 					diff = GenerateDiff (GetCommitContent (c1, change.getNewPath ()), GetCommitContent (c2, change.getNewPath ()));
-					break;
-				}
 				DiffInfo di = new DiffInfo (RootPath, RootRepository.FromGitPath (change.getNewPath ()), diff);
 				diffs.Add (di);
 			}
@@ -1780,20 +1815,29 @@ namespace MonoDevelop.VersionControl.Git
 			this.cfg = cfg;
 			RepoRemote = rem;
 			Name = rem.getName();
-			FetchUrl = rem.getURIs().Select (u => u.toString ()).FirstOrDefault ();
-			PushUrl = rem.getPushURIs().Select (u => u.toString ()).FirstOrDefault ();
+
+			// TODO
+			//FetchUrl = rem.getURIs().Select (u => u.ToString ()).FirstOrDefault ();
+			//PushUrl = rem.getPushURIs().Select (u => u.toString ()).FirstOrDefault ();
 			if (string.IsNullOrEmpty (PushUrl))
 				PushUrl = FetchUrl;
 		}
 
 		internal void Update ()
 		{
-			RepoRemote.Name = Name;
-			
-			var list = new List<URIish> (RepoRemote.getURIs ());
+			// TODO
+			//RepoRemote.Name = Name;
+
+			var list = new List<URIish> (RepoRemote.getURIs ().size ());
+			var li = RepoRemote.getURIs ().listIterator ();
+			while (li.hasNext ())
+				list.Add ((URIish)li.next ());
 			list.ForEach (u => RepoRemote.removeURI (u));
-			
-			list = new List<URIish> (RepoRemote.getPushURIs ());
+
+			list = new List<URIish> (RepoRemote.getPushURIs ().size ());
+			li = RepoRemote.getPushURIs ().listIterator ();
+			while (li.hasNext ())
+				list.Add ((URIish)li.next ());
 			list.ForEach (u => RepoRemote.removePushURI (u));
 			
 			RepoRemote.addURI (new URIish (FetchUrl));
@@ -1827,7 +1871,7 @@ namespace MonoDevelop.VersionControl.Git
 			this.totalTasksOverride = totalTasksOverride;
 		}
 		
-		public override void start (int totalTasks)
+		public void start (int totalTasks)
 		{
 			monitorStarted = true;
 			currentStep = 0;
@@ -1835,9 +1879,9 @@ namespace MonoDevelop.VersionControl.Git
 			totalTasksOverride = -1;
 			monitor.BeginTask (null, currentWork);
 		}
-		
-		
-		public override void beginTask (string title, int totalWork)
+
+
+		public void beginTask (string title, int totalWork)
 		{
 			if (taskStarted)
 				endTask ();
@@ -1849,7 +1893,7 @@ namespace MonoDevelop.VersionControl.Git
 		}
 		
 		
-		public override void update (int completed)
+		public void update (int completed)
 		{
 			currentStep += completed;
 			if (currentStep >= (currentWork / 100)) {
@@ -1859,7 +1903,7 @@ namespace MonoDevelop.VersionControl.Git
 		}
 		
 		
-		public override void endTask ()
+		public void endTask ()
 		{
 			taskStarted = false;
 			monitor.EndTask ();
@@ -1867,7 +1911,7 @@ namespace MonoDevelop.VersionControl.Git
 		}
 		
 		
-		public override bool isCancelled ()
+		public bool isCancelled ()
 		{
 			return monitor.IsCancelRequested;
 		}
@@ -1888,17 +1932,17 @@ namespace MonoDevelop.VersionControl.Git
 		{
 		}
 		
-		public override DirCache ReadDirCache ()
+		public override DirCache readDirCache ()
 		{
 			DirCache dc = null;
 			if (dirCacheRef != null)
 				dc = dirCacheRef.Target as DirCache;
 			if (dc != null) {
-				DateTime wt = File.GetLastWriteTime (getIndexFile ());
+				DateTime wt = File.GetLastWriteTime (getIndexFile ().getAbsolutePath ());
 				if (wt == dirCacheTimestamp)
 					return dc;
 			}
-			dirCacheTimestamp = File.GetLastWriteTime (getIndexFile ());
+			dirCacheTimestamp = File.GetLastWriteTime (getIndexFile ().getAbsolutePath ());
 			dc = base.readDirCache ();
 			dirCacheRef = new WeakReference (dc);
 			return dc;

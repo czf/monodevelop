@@ -195,20 +195,21 @@ namespace MonoDevelop.VersionControl.Git
 		{
 			string msg = "";
 			if (result.getFailingPaths () != null) {
-				foreach (var f in result.getFailingPaths ()) {
+				var failing = result.getFailingPaths ();
+				var iterator = failing.keySet ().iterator ();
+				while (iterator.hasNext ()) {
+					var key = iterator.next ();
 					if (msg.Length > 0)
 						msg += "\n";
-					switch (f.Value) {
-					case org.eclipse.jgit.merge.ResolveMerger.MergeFailureReason.DIRTY_WORKTREE:
-						msg += GettextCatalog.GetString ("The file '{0}' has unstaged changes", f.Key);
-						break;
-					case org.eclipse.jgit.merge.ResolveMerger.MergeFailureReason.DIRTY_INDEX:
-						msg += GettextCatalog.GetString ("The file '{0}' has staged changes", f.Key);
-						break;
-					case org.eclipse.jgit.merge.ResolveMerger.MergeFailureReason.COULD_NOT_DELETE:
-						msg += GettextCatalog.GetString ("The file '{0}' could not be deleted", f.Key);
-						break;
-					}
+
+					var value = (org.eclipse.jgit.merge.ResolveMerger.MergeFailureReason)failing.get (key);
+
+					if (value == org.eclipse.jgit.merge.ResolveMerger.MergeFailureReason.DIRTY_WORKTREE)
+						msg += GettextCatalog.GetString ("The file '{0}' has unstaged changes", key);
+					else if (value == org.eclipse.jgit.merge.ResolveMerger.MergeFailureReason.DIRTY_INDEX)
+						msg += GettextCatalog.GetString ("The file '{0}' has staged changes", key);
+					else if (value == org.eclipse.jgit.merge.ResolveMerger.MergeFailureReason.COULD_NOT_DELETE)
+						msg += GettextCatalog.GetString ("The file '{0}' could not be deleted", key);
 				}
 			}
 			return msg;
