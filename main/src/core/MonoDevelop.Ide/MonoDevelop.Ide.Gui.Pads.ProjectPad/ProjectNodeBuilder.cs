@@ -39,6 +39,7 @@ using MonoDevelop.Components.Commands;
 using MonoDevelop.Ide.Gui.Components;
 using MonoDevelop.Ide.Gui.Dialogs;
 using System.Linq;
+using MonoDevelop.Ide.Tasks;
 
 namespace MonoDevelop.Ide.Gui.Pads.ProjectPad
 {
@@ -49,7 +50,8 @@ namespace MonoDevelop.Ide.Gui.Pads.ProjectPad
 		ProjectFileRenamedEventHandler fileRenamedHandler;
 		ProjectFileEventHandler filePropertyChangedHandler;
 		SolutionItemModifiedEventHandler projectChanged;
-		
+		EventHandler<FileEventArgs> deletedHandler;
+
 		public override Type NodeDataType {
 			get { return typeof(Project); }
 		}
@@ -65,13 +67,14 @@ namespace MonoDevelop.Ide.Gui.Pads.ProjectPad
 			filePropertyChangedHandler = (ProjectFileEventHandler) DispatchService.GuiDispatch (new ProjectFileEventHandler (OnFilePropertyChanged));
 			fileRenamedHandler = (ProjectFileRenamedEventHandler) DispatchService.GuiDispatch (new ProjectFileRenamedEventHandler (OnRenameFile));
 			projectChanged = (SolutionItemModifiedEventHandler) DispatchService.GuiDispatch (new SolutionItemModifiedEventHandler (OnProjectModified));
-			
+			deletedHandler = (EventHandler<FileEventArgs>) DispatchService.GuiDispatch (new EventHandler<FileEventArgs> (OnSystemFileDeleted));
+
 			IdeApp.Workspace.FileAddedToProject += fileAddedHandler;
 			IdeApp.Workspace.FileRemovedFromProject += fileRemovedHandler;
 			IdeApp.Workspace.FileRenamedInProject += fileRenamedHandler;
 			IdeApp.Workspace.FilePropertyChangedInProject += filePropertyChangedHandler;
-			
 			IdeApp.Workspace.ActiveConfigurationChanged += IdeAppWorkspaceActiveConfigurationChanged;
+			FileService.FileRemoved += deletedHandler;
 		}
 
 		public override void Dispose ()
@@ -81,6 +84,7 @@ namespace MonoDevelop.Ide.Gui.Pads.ProjectPad
 			IdeApp.Workspace.FileRenamedInProject -= fileRenamedHandler;
 			IdeApp.Workspace.FilePropertyChangedInProject -= filePropertyChangedHandler;
 			IdeApp.Workspace.ActiveConfigurationChanged -= IdeAppWorkspaceActiveConfigurationChanged;
+			FileService.FileRemoved -= deletedHandler;
 		}
 
 		public override void OnNodeAdded (object dataObject)
@@ -107,45 +111,52 @@ namespace MonoDevelop.Ide.Gui.Pads.ProjectPad
 			return ((Project)dataObject).BaseDirectory;
 		}
 		
-		public override void BuildNode (ITreeBuilder treeBuilder, object dataObject, ref string label, ref Gdk.Pixbuf icon, ref Gdk.Pixbuf closedIcon)
+		public override void BuildNode (ITreeBuilder treeBuilder, object dataObject, NodeInfo nodeInfo)
 		{
-			base.BuildNode (treeBuilder, dataObject, ref label, ref icon, ref closedIcon);
+			base.BuildNode (treeBuilder, dataObject, nodeInfo);
 
 			Project p = dataObject as Project;
 			
 			string escapedProjectName = GLib.Markup.EscapeText (p.Name);
-			string iconName;
-			
+
 			if (p is DotNetProject && ((DotNetProject)p).LanguageBinding == null) {
-				iconName = Gtk.Stock.DialogError;
-				label = GettextCatalog.GetString ("{0} <span foreground='red' size='small'>(Unknown language '{1}')</span>", escapedProjectName, ((DotNetProject)p).LanguageName);
+				nodeInfo.Icon = Context.GetIcon (Stock.Project);
+				nodeInfo.Label = escapedProjectName;
+				nodeInfo.StatusSeverity = TaskSeverity.Error;
+				nodeInfo.StatusMessage = GettextCatalog.GetString ("Unknown language '{0}'", ((DotNetProject)p).LanguageName);
+				nodeInfo.DisabledStyle = true;
+				return;
 			} else if (p is UnknownProject) {
-				iconName = Gtk.Stock.DialogError;
-				label = GettextCatalog.GetString ("{0} <span foreground='red' size='small'>(Unknown project type)</span>", escapedProjectName);
-			} else {
-				iconName = p.StockIcon;
-				if (p.ParentSolution != null && p.ParentSolution.SingleStartup && p.ParentSolution.StartupItem == p)
-					label = "<b>" + escapedProjectName + "</b>";
-				else
-					label = escapedProjectName;
+				var up = (UnknownProject)p;
+				nodeInfo.StatusSeverity = TaskSeverity.Warning;
+				nodeInfo.StatusMessage = up.LoadError.TrimEnd ('.');
+				nodeInfo.Label = escapedProjectName;
+				nodeInfo.DisabledStyle = true;
+				nodeInfo.Icon = Context.GetIcon (p.StockIcon);
+				return;
 			}
-			
-			icon = Context.GetIcon (iconName);
-			
+
+			nodeInfo.Icon = Context.GetIcon (p.StockIcon);
+			if (p.ParentSolution != null && p.ParentSolution.SingleStartup && p.ParentSolution.StartupItem == p)
+				nodeInfo.Label = "<b>" + escapedProjectName + "</b>";
+			else
+				nodeInfo.Label = escapedProjectName;
+
 			// Gray out the project name if it is not selected in the current build configuration
 			
 			SolutionConfiguration conf = p.ParentSolution.GetConfiguration (IdeApp.Workspace.ActiveConfiguration);
 			SolutionConfigurationEntry ce = null;
 			bool noMapping = conf == null || (ce = conf.GetEntryForItem (p)) == null;
 			bool missingConfig = false;
-			if (noMapping || !ce.Build || (missingConfig = p.Configurations [ce.ItemConfiguration] == null)) {
-				Gdk.Pixbuf ticon = Context.GetComposedIcon (icon, "project-no-build");
-				if (ticon == null)
-					ticon = Context.CacheComposedIcon (icon, "project-no-build", ImageService.MakeTransparent (icon, 0.5));
-				icon = ticon;
-				label = missingConfig
-					? "<span foreground='red'>" + label + " <small>(invalid configuration mapping)</small></span>"
-					: "<span foreground='gray'>" + label + " <small>(not built in active configuration)</small></span>";
+			if (p.SupportsBuild () && (noMapping || !ce.Build || (missingConfig = p.Configurations [ce.ItemConfiguration] == null))) {
+				nodeInfo.DisabledStyle = true;
+				if (missingConfig) {
+					nodeInfo.StatusSeverity = TaskSeverity.Error;
+					nodeInfo.StatusMessage = GettextCatalog.GetString ("Invalid configuration mapping");
+				} else {
+					nodeInfo.StatusSeverity = TaskSeverity.Information;
+					nodeInfo.StatusMessage = GettextCatalog.GetString ("Project not built in active configuration");
+				}
 			}
 		}
 
@@ -192,6 +203,23 @@ namespace MonoDevelop.Ide.Gui.Pads.ProjectPad
 				RemoveFile (e.ProjectFile, e.Project);
 		}
 		
+		void OnSystemFileDeleted (object sender, FileEventArgs args)
+		{
+			if (!args.Any (f => f.IsDirectory))
+				return;
+
+			// When a folder is deleted, we need to remove all references in the tree, for all projects
+			ITreeBuilder tb = Context.GetTreeBuilder ();
+			var dirs = args.Where (d => d.IsDirectory).Select (d => d.FileName).ToArray ();
+
+			foreach (var p in IdeApp.Workspace.GetAllProjects ()) {
+				foreach (var dir in dirs) {
+					if (tb.MoveToObject (new ProjectFolder (dir, p)) && tb.MoveToParent ())
+						tb.UpdateAll ();
+				}
+			}
+		}
+
 		void AddFile (ProjectFile file, Project project)
 		{
 			ITreeBuilder tb = Context.GetTreeBuilder ();
@@ -363,6 +391,13 @@ namespace MonoDevelop.Ide.Gui.Pads.ProjectPad
 			IdeApp.ProjectOperations.ShowOptions (project);
 		}
 		
+		[CommandUpdateHandler (ProjectCommands.SetAsStartupProject)]
+		public void UpdateSetAsStartupProject (CommandInfo ci)
+		{
+			Project project = (Project) CurrentNode.DataItem;
+			ci.Visible = project.CanExecute (new ExecutionContext (Runtime.ProcessService.DefaultExecutionHandler, null, IdeApp.Workspace.ActiveExecutionTarget), IdeApp.Workspace.ActiveConfiguration);
+		}
+
 		[CommandHandler (ProjectCommands.SetAsStartupProject)]
 		public void SetAsStartupProject ()
 		{

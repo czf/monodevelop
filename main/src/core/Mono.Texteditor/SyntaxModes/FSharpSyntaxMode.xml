@@ -29,6 +29,8 @@
 	<Property name="BlockCommentEnd">*)</Property>
 	<Property name="StringQuote">"</Property>
 
+	<Delimiters>&amp;&lt;&gt;~@%^*()-+=|\#/{}[]:;"' ,	?</Delimiters>
+
 	<EolSpan tagColor = "Preprocessor" rule="text.preprocessor">#if</EolSpan>
 	<EolSpan tagColor = "Preprocessor" rule="text.preprocessor">#else</EolSpan>
 	<EolSpan tagColor = "Preprocessor" rule="text.preprocessor">#elif</EolSpan>
@@ -70,7 +72,7 @@
 	
 	<Span rule="Let" stopateol = "false">
 		<Begin color="Keyword(Iteration)" flags="NewWord">let </Begin>
-		<End>=</End>
+		<End>=|(|&lt;</End>
 	</Span>
 
 <!-- 
@@ -90,11 +92,17 @@
        <Group color="String"/>
 	</Match> -->
 
-	<Match color="String">'(\w|\\['ntbrafv])'</Match>
+	<Match color="String" ignorecase="True">'(\w|\\['ntbrafv])'</Match>
        
 
 
 	<Match color="Number">CSharpNumber</Match>
+	<Match color="Keyword(Iteration)">(let|use|yield|return|do)(!)?\s</Match>
+	<Match color="Keyword(Iteration)">(let|use|yield|return|do)(!)?$</Match>
+
+	<!-- reserved-ident-keyword F# spec v3.0 section 3.4 -->
+	<Match color="Keyword(Other)">(atomic|break|checked|component|const|constraint|constructor|continue|eager|fixed|fori|functor|include|measure|method|mixin|object|parallel|params|process|protected|pure|recursive|sealed|tailcall|trait|virtual|volatile)[!#]?\s</Match>
+	<Match color="Keyword(Other)">(atomic|break|checked|component|const|constraint|constructor|continue|eager|fixed|fori|functor|include|measure|method|mixin|object|parallel|params|process|protected|pure|recursive|sealed|tailcall|trait|virtual|volatile)[!#]?$</Match>
 
 	<!-- It is really impossible to do some intelligent grouping here, because
 	     it looks weird no matter what we do... some things are context-sensitive,
@@ -114,17 +122,9 @@
 		<Word>with</Word>
 
 		<Word>val</Word>
-		<Word>use</Word>
-		<Word>yield</Word>
-		<Word>let!</Word>
-		<Word>use!</Word>
-		<Word>do!</Word>
-		<Word>yield!</Word>
-		<Word>return!</Word>
 		<Word>while</Word>
 		<Word>for</Word>
 
-		<Word>do</Word>
 		<Word>begin</Word>
 		<Word>done</Word>
 		<Word>elif</Word>
@@ -132,7 +132,6 @@
 		<Word>end</Word>
 		<Word>if</Word>
 		<Word>match</Word>
-		<Word>return</Word>
 		<Word>then</Word>
 		<Word>when</Word>
 
@@ -157,7 +156,6 @@
 		<Word>type</Word>
 
 		<Word>of</Word>
-		<Word>sig</Word>
 		<Word>class</Word>
 		<Word>delegate</Word>
 		<Word>exception</Word>
@@ -176,6 +174,7 @@
 		<Word>lazy</Word>
 		<Word>and</Word>
 		<Word>downcast</Word>
+		<Word>select</Word>
 	</Keywords>
 
 	<Keywords color="Keyword(Constants)">
@@ -214,6 +213,15 @@
 	</Keywords>
 
 	<Keywords color="Keyword(Other)">
+		<!-- reserved OCaml keywords -->
+		<Word>asr</Word>
+		<Word>land</Word>
+		<Word>lor</Word>
+		<Word>lsl</Word>
+		<Word>lsr</Word>
+		<Word>lxor</Word>
+		<Word>mod</Word>
+		<Word>sig</Word>
 	</Keywords>
 
 	<Rule name="text.preprocessor" ignorecase="True">
@@ -276,7 +284,7 @@
 	</Rule>
 
 	<Rule name="String">
-		<Match color ="String(Escape)">\\(U[0-9a-fA-F]{8}|u[0-9a-fA-F]{4}|[\\'ntbrafv])</Match>
+		<Match color ="String(Escape)" ignorecase="True">\\(U[0-9a-fA-F]{8}|u[0-9a-fA-F]{4}|[\\'ntbrafv])</Match>
 	</Rule>
 	
 	<Rule name="Let">
@@ -293,7 +301,7 @@
 
 	<Rule name="XmlDocumentation">
 		<Delimiters>&lt;&gt;</Delimiters>
-		<Span color = "Comment(DocTag)" rule = "XmlDocumentationTag">
+		<Span color = "Comment(DocTag)" rule = "XmlDocumentationTag" stopateol = "true">
 			<Begin>&lt;</Begin>
 			<End>&gt;</End>
 		</Span>

@@ -60,19 +60,19 @@ namespace MonoDevelop.AssemblyBrowser
 			return field.Name;
 		}
 		
-		public override void BuildNode (ITreeBuilder treeBuilder, object dataObject, ref string label, ref Gdk.Pixbuf icon, ref Gdk.Pixbuf closedIcon)
+		public override void BuildNode (ITreeBuilder treeBuilder, object dataObject, NodeInfo nodeInfo)
 		{
 			var field = (IUnresolvedField)dataObject;
 			try {
 				var resolved = Resolve (treeBuilder, field);
-				label = Ambience.GetString (resolved, OutputFlags.ClassBrowserEntries | OutputFlags.IncludeMarkup | OutputFlags.CompletionListFomat);
+				nodeInfo.Label = Ambience.GetString (resolved, OutputFlags.ClassBrowserEntries | OutputFlags.IncludeMarkup | OutputFlags.CompletionListFomat);
 			} catch (Exception) {
-				label = field.Name;
+				nodeInfo.Label = field.Name;
 			}
 
 			if (field.IsPrivate || field.IsInternal)
-				label = DomMethodNodeBuilder.FormatPrivate (label);
-			icon = ImageService.GetPixbuf (field.GetStockIcon (), Gtk.IconSize.Menu);
+				nodeInfo.Label = DomMethodNodeBuilder.FormatPrivate (nodeInfo.Label);
+			nodeInfo.Icon = Context.GetIcon (field.GetStockIcon ());
 		}
 		
 		#region IAssemblyBrowserNodeBuilder
@@ -92,7 +92,15 @@ namespace MonoDevelop.AssemblyBrowser
 			var field = CecilLoader.GetCecilObject ((IUnresolvedField)navigator.DataItem);
 			return DomMethodNodeBuilder.Decompile (data, DomMethodNodeBuilder.GetModule (navigator), field.DeclaringType, b => b.AddField (field));
 		}
-		
+
+		List<ReferenceSegment> IAssemblyBrowserNodeBuilder.GetSummary (TextEditorData data, ITreeNavigator navigator, bool publicOnly)
+		{
+			if (DomMethodNodeBuilder.HandleSourceCodeEntity (navigator, data)) 
+				return null;
+			var field = CecilLoader.GetCecilObject ((IUnresolvedField)navigator.DataItem);
+			return DomMethodNodeBuilder.GetSummary (data, DomMethodNodeBuilder.GetModule (navigator), field.DeclaringType, b => b.AddField (field));
+		}
+
 		string IAssemblyBrowserNodeBuilder.GetDocumentationMarkup (ITreeNavigator navigator)
 		{
 			var field = (IUnresolvedField)navigator.DataItem;

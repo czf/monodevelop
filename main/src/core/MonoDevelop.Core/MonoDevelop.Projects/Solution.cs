@@ -124,7 +124,7 @@ namespace MonoDevelop.Projects
 				if (startupItem == null && singleStartup) {
 					ReadOnlyCollection<SolutionEntityItem> its = GetAllSolutionItems<SolutionEntityItem> ();
 					if (its.Count > 0)
-						startupItem = its [0];
+						startupItem = its.FirstOrDefault (it => it.SupportsExecute ());
 				}
 				return startupItem;
 			}
@@ -180,7 +180,7 @@ namespace MonoDevelop.Projects
 		}
 
 		// Used by serialization only
-		[ProjectPathItemProperty ("StartupItem", DefaultValue=null)]
+		[ProjectPathItemProperty ("StartupItem", DefaultValue=null, ReadOnly=true)]
 		internal string StartupItemFileName {
 			get {
 				if (SingleStartup && StartupItem != null)
@@ -190,8 +190,8 @@ namespace MonoDevelop.Projects
 			}
 			set { startItemFileName = value; }
 		}
-		
-		[ItemProperty ("StartupItems")]
+
+		[ItemProperty ("StartupItems", ReadOnly=true)]
 		[ProjectPathItemProperty ("Item", Scope="*")]
 		internal List<string> MultiStartupItemFileNames {
 			get {
@@ -241,8 +241,26 @@ namespace MonoDevelop.Projects
 			LoadItemProperties (UserProperties, RootFolder, "MonoDevelop.Ide.ItemProperties");
 		}
 
+		public override void LoadUserProperties ()
+		{
+			base.LoadUserProperties ();
+			var sitem = UserProperties.GetValue<string> ("StartupItem");
+			if (!string.IsNullOrEmpty (sitem))
+				startItemFileName = GetAbsoluteChildPath (sitem);
+
+			var sitems = UserProperties.GetValue<string[]> ("StartupItems");
+			if (sitems != null && sitems.Length > 0)
+				multiStartupItems = sitems.Select (p => (string) GetAbsoluteChildPath (p)).ToList ();
+		}
+
 		public override void SaveUserProperties ()
 		{
+			UserProperties.SetValue ("StartupItem", (string) GetRelativeChildPath (StartupItemFileName));
+			if (MultiStartupItemFileNames != null) {
+				UserProperties.SetValue ("StartupItems", MultiStartupItemFileNames.Select (p => (string)GetRelativeChildPath (p)).ToArray ());
+			} else
+				UserProperties.RemoveValue ("StartupItems");
+
 			CollectItemProperties (UserProperties, RootFolder, "MonoDevelop.Ide.ItemProperties");
 			base.SaveUserProperties ();
 			CleanItemProperties (UserProperties, RootFolder, "MonoDevelop.Ide.ItemProperties");
@@ -288,7 +306,7 @@ namespace MonoDevelop.Projects
 		
 		public void CreateDefaultConfigurations ()
 		{
-			foreach (SolutionEntityItem item in Items) {
+			foreach (SolutionEntityItem item in Items.Where (it => it.SupportsBuild ())) {
 				foreach (ItemConfiguration conf in item.Configurations) {
 					SolutionConfiguration sc = Configurations [conf.Id];
 					if (sc == null) {
@@ -308,7 +326,7 @@ namespace MonoDevelop.Projects
 		public SolutionConfiguration AddConfiguration (string name, bool createConfigForItems)
 		{
 			SolutionConfiguration conf = new SolutionConfiguration (name);
-			foreach (SolutionEntityItem item in Items) {
+			foreach (SolutionEntityItem item in Items.Where (it => it.SupportsBuild())) {
 				if (createConfigForItems && item.GetConfiguration (new ItemConfigurationSelector (name)) == null) {
 					SolutionItemConfiguration newc = item.CreateConfiguration (name);
 					if (item.DefaultConfiguration != null)
@@ -367,9 +385,15 @@ namespace MonoDevelop.Projects
 			return RootFolder.GetAllProjectsWithTopologicalSort (configuration);
 		}
 
+		[Obsolete("Use GetProjectsContainingFile() (plural) instead")]
 		public override Project GetProjectContainingFile (FilePath fileName) 
 		{
 			return RootFolder.GetProjectContainingFile (fileName);
+		}
+
+		public override IEnumerable<Project> GetProjectsContainingFile (FilePath fileName)
+		{
+			return RootFolder.GetProjectsContainingFile (fileName);
 		}
 		
 		public override bool ContainsItem (IWorkspaceObject obj)
@@ -661,20 +685,25 @@ namespace MonoDevelop.Projects
 			SolutionEntityItem eitem = item as SolutionEntityItem;
 			if (eitem != null) {
 				eitem.NeedsReload = false;
-				if (replacedItem == null) {
-					// Register the new entry in every solution configuration
-					foreach (SolutionConfiguration conf in Configurations)
-						conf.AddItem (eitem);
-				} else {
-					// Reuse the configuration information of the replaced item
-					foreach (SolutionConfiguration conf in Configurations)
-						conf.ReplaceItem ((SolutionEntityItem)replacedItem, eitem);
-					if (StartupItem == replacedItem)
-						StartupItem = eitem;
-					else {
-						int i = MultiStartupItems.IndexOf ((SolutionEntityItem)replacedItem);
-						if (i != -1)
-							MultiStartupItems [i] = eitem;
+				if (eitem.SupportsConfigurations () || replacedItem != null) {
+					if (replacedItem == null) {
+						// Register the new entry in every solution configuration
+						foreach (SolutionConfiguration conf in Configurations)
+							conf.AddItem (eitem);
+						// If there is no startup project or it is an invalid one, use the new project as startup if possible
+						if (!Loading && (StartupItem == null || !StartupItem.SupportsExecute ()) && eitem.SupportsExecute ())
+							StartupItem = eitem;
+					} else {
+						// Reuse the configuration information of the replaced item
+						foreach (SolutionConfiguration conf in Configurations)
+							conf.ReplaceItem ((SolutionEntityItem)replacedItem, eitem);
+						if (StartupItem == replacedItem)
+							StartupItem = eitem;
+						else {
+							int i = MultiStartupItems.IndexOf ((SolutionEntityItem)replacedItem);
+							if (i != -1)
+								MultiStartupItems [i] = eitem;
+						}
 					}
 				}
 			}
@@ -715,8 +744,8 @@ namespace MonoDevelop.Projects
 			if (!reloading) {
 				foreach (SolutionConfiguration conf in Configurations)
 					conf.RemoveItem (item);
-				if (item is DotNetProject)
-					RemoveReferencesToProject ((DotNetProject)item);
+				if (item is Project)
+					RemoveReferencesToProject ((Project)item);
 
 				if (StartupItem == item)
 					StartupItem = null;
@@ -728,7 +757,7 @@ namespace MonoDevelop.Projects
 			item.FileName = item.FileName;
 		}
 		
-		void RemoveReferencesToProject (DotNetProject projectToRemove)
+		void RemoveReferencesToProject (Project projectToRemove)
 		{
 			if (projectToRemove == null)
 				return;

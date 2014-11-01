@@ -58,7 +58,6 @@ namespace MonoDevelop.Ide
 		static IdeServices ideServices;
 		static RootWorkspace workspace;
 		static IdePreferences preferences;
-		static IdeCustomizer customizer;
 
 		public const int CurrentRevision = 5;
 		
@@ -226,7 +225,7 @@ namespace MonoDevelop.Ide
 			TypeSystemService.TrackFileChanges = true;
 			TypeSystemService.ParseProgressMonitorFactory = new ParseProgressMonitorFactory (); 
 
-			Customizer.Initialize ();
+			Customizer.OnIdeInitialized ();
 			
 			// Startup commands
 			Counters.Initialization.Trace ("Running Startup Commands");
@@ -283,8 +282,10 @@ namespace MonoDevelop.Ide
 				}
 			}
 			
-			if (initializedEvent != null)
+			if (initializedEvent != null) {
 				initializedEvent (null, EventArgs.Empty);
+				initializedEvent = null;
+			}
 			
 			// load previous combine
 			if ((bool)PropertyService.Get("SharpDevelop.LoadPrevProjectOnStartup", false)) {
@@ -461,7 +462,7 @@ namespace MonoDevelop.Ide
 		{
 			if (IdeApp.Preferences.EnableInstrumentation) {
 				if (instrumentationStatusIcon == null) {
-					instrumentationStatusIcon = IdeApp.Workbench.StatusBar.ShowStatusIcon (ImageService.GetPixbuf (Gtk.Stock.DialogInfo));
+					instrumentationStatusIcon = IdeApp.Workbench.StatusBar.ShowStatusIcon (ImageService.GetIcon (MonoDevelop.Ide.Gui.Stock.Information));
 					instrumentationStatusIcon.ToolTip = "Instrumentation service enabled";
 					instrumentationStatusIcon.EventBox.ButtonPressEvent += delegate {
 						InstrumentationService.StartMonitor ();

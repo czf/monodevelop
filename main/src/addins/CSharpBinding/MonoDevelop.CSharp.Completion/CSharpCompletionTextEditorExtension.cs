@@ -25,39 +25,46 @@
 // THE SOFTWARE.
 
 using System;
-using MonoDevelop.Ide.Gui.Content;
-using ICSharpCode.NRefactory.CSharp;
-using MonoDevelop.Core;
-using MonoDevelop.Ide.CodeCompletion;
-using ICSharpCode.NRefactory.CSharp.Resolver;
-using ICSharpCode.NRefactory.TypeSystem;
-using MonoDevelop.Ide.TypeSystem;
-using System.Collections.Generic;
-using MonoDevelop.Projects;
-using MonoDevelop.CSharp.Project;
 using System.Linq;
-using MonoDevelop.CSharp.Formatting;
-using ICSharpCode.NRefactory.TypeSystem.Implementation;
-using ICSharpCode.NRefactory.CSharp.Refactoring;
 using System.Text;
-using MonoDevelop.Ide.CodeTemplates;
-using ICSharpCode.NRefactory.Semantics;
-using ICSharpCode.NRefactory;
-using ICSharpCode.NRefactory.Completion;
-using ICSharpCode.NRefactory.CSharp.Completion;
-using ICSharpCode.NRefactory.CSharp.TypeSystem;
-using Mono.TextEditor;
-using MonoDevelop.Components.Commands;
-using MonoDevelop.CodeGeneration;
-using MonoDevelop.CSharp.Refactoring.CodeActions;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Collections.Generic;
+
+using Mono.TextEditor;
+
+using MonoDevelop.Core;
+using MonoDevelop.Debugger;
+using MonoDevelop.Projects;
+using MonoDevelop.Ide.Gui;
+using MonoDevelop.CodeGeneration;
+using MonoDevelop.Ide.TypeSystem;
+using MonoDevelop.Ide.Gui.Content;
+using MonoDevelop.Ide.CodeTemplates;
+using MonoDevelop.Ide.CodeCompletion;
+using MonoDevelop.Components.Commands;
+
+using ICSharpCode.NRefactory;
+using ICSharpCode.NRefactory.CSharp;
+using ICSharpCode.NRefactory.Semantics;
+using ICSharpCode.NRefactory.Completion;
+using ICSharpCode.NRefactory.TypeSystem;
+using ICSharpCode.NRefactory.CSharp.Resolver;
+using ICSharpCode.NRefactory.CSharp.Completion;
+using ICSharpCode.NRefactory.CSharp.TypeSystem;
+using ICSharpCode.NRefactory.CSharp.Refactoring;
+
+using MonoDevelop.CSharp.Project;
+using MonoDevelop.CSharp.Formatting;
+using MonoDevelop.CSharp.Refactoring.CodeActions;
+using MonoDevelop.Refactoring;
+using System.Xml;
 
 namespace MonoDevelop.CSharp.Completion
 {
-	public class CSharpCompletionTextEditorExtension : CompletionTextEditorExtension, IParameterCompletionDataFactory, ITextEditorMemberPositionProvider
+	public class CSharpCompletionTextEditorExtension : CompletionTextEditorExtension, IParameterCompletionDataFactory, ITextEditorMemberPositionProvider, IDebuggerExpressionResolver
 	{
-		internal Mono.TextEditor.TextEditorData TextEditorData {
+		internal protected virtual Mono.TextEditor.TextEditorData TextEditorData {
 			get {
 				var doc = Document;
 				if (doc == null)
@@ -65,7 +72,11 @@ namespace MonoDevelop.CSharp.Completion
 				return doc.Editor;
 			}
 		}
-		
+
+		protected virtual IProjectContent ProjectContent {
+			get { return Document.GetProjectContext (); }
+		}
+
 		SyntaxTree unit;
 		static readonly SyntaxTree emptyUnit = new SyntaxTree ();
 		SyntaxTree Unit {
@@ -99,10 +110,8 @@ namespace MonoDevelop.CSharp.Completion
 			}
 		}
 		
-		public ICompilation Compilation {
-			get {
-				return document.Compilation;
-			}
+		public virtual ICompilation Compilation {
+			get { return Project != null ? TypeSystemService.GetCompilation (Project) : ProjectContent.CreateCompilation (); }
 		}
 		
 		public MonoDevelop.Projects.Project Project {
@@ -141,13 +150,16 @@ namespace MonoDevelop.CSharp.Completion
 		public CSharpCompletionTextEditorExtension ()
 		{
 		}
-		
+
+		bool addEventHandlersInInitialization = true;
+
 		/// <summary>
 		/// Used in testing environment.
 		/// </summary>
 		[System.ComponentModel.Browsable(false)]
-		public CSharpCompletionTextEditorExtension (MonoDevelop.Ide.Gui.Document doc) : this ()
+		public CSharpCompletionTextEditorExtension (MonoDevelop.Ide.Gui.Document doc, bool addEventHandlersInInitialization = true) : this ()
 		{
+			this.addEventHandlersInInitialization = addEventHandlersInInitialization;
 			Initialize (doc);
 		}
 		
@@ -157,12 +169,14 @@ namespace MonoDevelop.CSharp.Completion
 			var parsedDocument = document.ParsedDocument;
 			if (parsedDocument != null) {
 				this.Unit = parsedDocument.GetAst<SyntaxTree> ();
-				this.UnresolvedFileCompilation = Document.Compilation;
+				this.UnresolvedFileCompilation = Compilation;
 				this.CSharpUnresolvedFile = parsedDocument.ParsedFile as CSharpUnresolvedFile;
-				document.Editor.Caret.PositionChanged += HandlePositionChanged;
+				if (addEventHandlersInInitialization)
+					document.Editor.Caret.PositionChanged += HandlePositionChanged;
 			}
-			
-			Document.DocumentParsed += HandleDocumentParsed; 
+
+			if (addEventHandlersInInitialization)
+				Document.DocumentParsed += HandleDocumentParsed; 
 		}
 
 		CancellationTokenSource src = new CancellationTokenSource ();
@@ -176,20 +190,18 @@ namespace MonoDevelop.CSharp.Completion
 		void HandlePositionChanged (object sender, DocumentLocationEventArgs e)
 		{
 			StopPositionChangedTask ();
-			Task.Factory.StartNew (delegate {
-				var doc = Document;
-				if (doc == null || doc.Editor == null)
-					return;
-				var ctx = MDRefactoringContext.Create (doc, doc.Editor.Caret.Location, src.Token);
-				if (ctx != null)
-					MDRefactoringCtx = ctx;
-			});
+			var doc = Document;
+			if (doc == null || doc.Editor == null)
+				return;
+			MDRefactoringContext.Create (doc, doc.Editor.Caret.Location, src.Token).ContinueWith (t => {
+				MDRefactoringCtx = t.Result;
+			}, TaskContinuationOptions.ExecuteSynchronously);
 		}
 		
 		[CommandUpdateHandler (CodeGenerationCommands.ShowCodeGenerationWindow)]
 		public void CheckShowCodeGenerationWindow (CommandInfo info)
 		{
-			info.Enabled = Document.Editor != null && Document.GetContent<ICompletionWidget> () != null;
+			info.Enabled = TextEditorData != null && Document.GetContent<ICompletionWidget> () != null;
 		}
 
 		[CommandHandler (CodeGenerationCommands.ShowCodeGenerationWindow)]
@@ -198,7 +210,7 @@ namespace MonoDevelop.CSharp.Completion
 			var completionWidget = Document.GetContent<ICompletionWidget> ();
 			if (completionWidget == null)
 				return;
-			CodeCompletionContext completionContext = completionWidget.CreateCodeCompletionContext (Document.Editor.Caret.Offset);
+			CodeCompletionContext completionContext = completionWidget.CreateCodeCompletionContext (TextEditorData.Caret.Offset);
 			GenerateCodeWindow.ShowIfValid (Document, completionContext);
 		}
 
@@ -227,7 +239,7 @@ namespace MonoDevelop.CSharp.Completion
 			var newDocument = Document.ParsedDocument;
 			if (newDocument == null) 
 				return;
-			var newTree = TypeSystemSegmentTree.Create (Document);
+			var newTree = TypeSystemSegmentTree.Create (newDocument, TextEditorData);
 
 			if (unstableTypeSystemSegmentTree != null)
 				unstableTypeSystemSegmentTree.RemoveListener ();
@@ -244,7 +256,7 @@ namespace MonoDevelop.CSharp.Completion
 
 			this.Unit = newDocument.GetAst<SyntaxTree> ();
 			this.CSharpUnresolvedFile = newDocument.ParsedFile as CSharpUnresolvedFile;
-			this.UnresolvedFileCompilation = Document.Compilation;
+			this.UnresolvedFileCompilation = Compilation;
 			if (TypeSegmentTreeUpdated != null)
 				TypeSegmentTreeUpdated (this, EventArgs.Empty);
 		}
@@ -277,7 +289,7 @@ namespace MonoDevelop.CSharp.Completion
 			//	var timer = Counters.ResolveTime.BeginTiming ();
 			try {
 				if (char.IsLetterOrDigit (completionChar) || completionChar == '_') {
-					if (completionContext.TriggerOffset > 1 && char.IsLetterOrDigit (document.Editor.GetCharAt (completionContext.TriggerOffset - 2)))
+					if (completionContext.TriggerOffset > 1 && char.IsLetterOrDigit (TextEditorData.GetCharAt (completionContext.TriggerOffset - 2)))
 						return null;
 					triggerWordLength = 1;
 				}
@@ -286,7 +298,7 @@ namespace MonoDevelop.CSharp.Completion
 				LoggingService.LogError ("Unexpected code completion exception." + Environment.NewLine + 
 					"FileName: " + Document.FileName + Environment.NewLine + 
 					"Position: line=" + completionContext.TriggerLine + " col=" + completionContext.TriggerLineOffset + Environment.NewLine + 
-					"Line text: " + Document.Editor.GetLineText (completionContext.TriggerLine), 
+					"Line text: " + TextEditorData.GetLineText (completionContext.TriggerLine), 
 					e);
 				return null;
 			} finally {
@@ -310,7 +322,7 @@ namespace MonoDevelop.CSharp.Completion
 
 		ICompletionContextProvider CreateContextProvider ()
 		{
-			return new CompletionContextProvider (document, validTypeSystemSegmentTree, unstableTypeSystemSegmentTree);
+			return new CompletionContextProvider (document.ParsedDocument, TextEditorData, validTypeSystemSegmentTree, unstableTypeSystemSegmentTree);
 		}
 
 		CSharpTypeResolveContext CreateTypeResolveContext ()
@@ -352,14 +364,14 @@ namespace MonoDevelop.CSharp.Completion
 				return null;
 
 			var list = new CSharpCompletionDataList ();
-			list.Resolver = CSharpUnresolvedFile != null ? CSharpUnresolvedFile.GetResolver (UnresolvedFileCompilation, Document.Editor.Caret.Location) : new CSharpResolver (Compilation);
+			list.Resolver = CSharpUnresolvedFile != null ? CSharpUnresolvedFile.GetResolver (UnresolvedFileCompilation, TextEditorData.Caret.Location) : new CSharpResolver (Compilation);
 			var ctx = CreateTypeResolveContext ();
 			if (ctx == null)
 				return null;
 			var completionDataFactory = new CompletionDataFactory (this, new CSharpResolver (ctx));
 			if (MDRefactoringCtx == null) {
 				src.Cancel ();
-				MDRefactoringCtx = MDRefactoringContext.Create (Document, Document.Editor.Caret.Location);
+				MDRefactoringCtx = MDRefactoringContext.Create (Document, TextEditorData.Caret.Location).Result;
 			}
 
 			var engine = new MonoCSharpCompletionEngine (
@@ -367,7 +379,7 @@ namespace MonoDevelop.CSharp.Completion
 				data.Document,
 				CreateContextProvider (),
 				completionDataFactory,
-				Document.GetProjectContext (),
+				ProjectContent,
 				ctx
 			);
 			completionDataFactory.Engine = engine;
@@ -440,11 +452,11 @@ namespace MonoDevelop.CSharp.Completion
 				TextEditorData.Document,
 				CreateContextProvider (),
 				this,
-				Document.GetProjectContext (),
+				ProjectContent,
 				ctx
 				);
 			List<string> list;
-			int cparam = engine.GetCurrentParameterIndex (provider.StartOffset, document.Editor.Caret.Offset, out list);
+			int cparam = engine.GetCurrentParameterIndex (provider.StartOffset, TextEditorData.Caret.Offset, out list);
 			if (cparam > provider.GetParameterCount (currentOverload) && !provider.AllowParameterList (currentOverload) || !HasAllUsedParameters (provider, list, currentOverload)) {
 				// Look for an overload which has more parameters
 				int bestOverload = -1;
@@ -598,12 +610,15 @@ namespace MonoDevelop.CSharp.Completion
 			if (ctx == null)
 				return null;
 
+			if (completionChar != '(' && completionChar != ',')
+				return null;
+
 			try {
 				var engine = new CSharpParameterCompletionEngine (
 					TextEditorData.Document,
 					CreateContextProvider (),
 					this,
-					Document.GetProjectContext (),
+					ProjectContent,
 					ctx
 				);
 				return engine.GetParameterDataProvider (completionContext.TriggerOffset, completionChar) as ParameterDataProvider;
@@ -611,7 +626,7 @@ namespace MonoDevelop.CSharp.Completion
 				LoggingService.LogError ("Unexpected parameter completion exception." + Environment.NewLine + 
 					"FileName: " + Document.FileName + Environment.NewLine + 
 					"Position: line=" + completionContext.TriggerLine + " col=" + completionContext.TriggerLineOffset + Environment.NewLine + 
-					"Line text: " + Document.Editor.GetLineText (completionContext.TriggerLine), 
+					"Line text: " + TextEditorData.GetLineText (completionContext.TriggerLine), 
 					e);
 				return null;
 			} finally {
@@ -622,11 +637,11 @@ namespace MonoDevelop.CSharp.Completion
 		
 		List<string> GetUsedNamespaces ()
 		{
-			var scope = CSharpUnresolvedFile.GetUsingScope (document.Editor.Caret.Location);
+			var scope = CSharpUnresolvedFile.GetUsingScope (TextEditorData.Caret.Location);
 			var result = new List<string> ();
 			while (scope != null) {
 				result.Add (scope.NamespaceName);
-				var ctx = CSharpUnresolvedFile.GetResolver (Document.Compilation, scope.Region.Begin);
+				var ctx = CSharpUnresolvedFile.GetResolver (Compilation, scope.Region.Begin);
 				foreach (var u in scope.Usings) {
 					var ns = u.ResolveNamespace (ctx);
 					if (ns == null)
@@ -650,10 +665,10 @@ namespace MonoDevelop.CSharp.Completion
 				TextEditorData.Document,
 				CreateContextProvider (),
 				this,
-				Document.GetProjectContext (),
+				ProjectContent,
 				ctx
 			);
-			engine.SetOffset (document.Editor.Caret.Offset);
+			engine.SetOffset (TextEditorData.Caret.Offset);
 			return engine.GetParameterCompletionCommandOffset (out cpos);
 		}
 
@@ -667,11 +682,11 @@ namespace MonoDevelop.CSharp.Completion
 				TextEditorData.Document,
 				CreateContextProvider (),
 				this,
-				Document.GetProjectContext (),
+				ProjectContent,
 				ctx
 			);
 			List<string> list;
-			return engine.GetCurrentParameterIndex (startOffset, document.Editor.Caret.Offset, out list);
+			return engine.GetCurrentParameterIndex (startOffset, TextEditorData.Caret.Offset, out list);
 		}
 		/*
 		internal int GetCurrentParameterIndex (ICompletionWidget widget, int offset, int memberStart)
@@ -1026,7 +1041,7 @@ namespace MonoDevelop.CSharp.Completion
 
 			ICompletionData ICompletionDataFactory.CreateNamespaceCompletionData (INamespace name)
 			{
-				return new CompletionData (name.Name, AstStockIcons.Namespace);
+				return new CompletionData (name.Name, AstStockIcons.Namespace, "", CSharpAmbience.FilterName (name.Name));
 			}
 
 			ICompletionData ICompletionDataFactory.CreateVariableCompletionData (IVariable variable)
@@ -1050,7 +1065,7 @@ namespace MonoDevelop.CSharp.Completion
 			}
 			ICompletionData ICompletionDataFactory.CreateNewPartialCompletionData (int declarationBegin, IUnresolvedTypeDefinition type, IUnresolvedMember m)
 			{
-				var ctx = ext.CSharpUnresolvedFile.GetTypeResolveContext (ext.UnresolvedFileCompilation, ext.document.Editor.Caret.Location);
+				var ctx = ext.CSharpUnresolvedFile.GetTypeResolveContext (ext.UnresolvedFileCompilation, ext.TextEditorData.Caret.Location);
 				return new NewOverrideCompletionData (ext, declarationBegin, type, m.CreateResolved (ctx));
 			}
 			IEnumerable<ICompletionData> ICompletionDataFactory.CreateCodeTemplateCompletionData ()
@@ -1326,6 +1341,162 @@ namespace MonoDevelop.CSharp.Completion
 			return new TypeParameterDataProvider (startOffset, this, methods);
 		}
 		#endregion
+
+		#region IDebuggerExpressionResolver implementation
+
+		static string GetIdentifierName (TextEditorData editor, Identifier id, out int startOffset)
+		{
+			startOffset = editor.LocationToOffset (id.StartLocation.Line, id.StartLocation.Column);
+
+			return editor.GetTextBetween (id.StartLocation, id.EndLocation);
+		}
+
+		internal static string ResolveExpression (TextEditorData editor, ResolveResult result, AstNode node, out int startOffset)
+		{
+			//Console.WriteLine ("result is a {0}", result.GetType ().Name);
+			startOffset = -1;
+
+			if (result is NamespaceResolveResult ||
+				result is ConversionResolveResult ||
+				result is ConstantResolveResult ||
+				result is ForEachResolveResult ||
+				result is TypeIsResolveResult ||
+				result is TypeOfResolveResult ||
+				result is ErrorResolveResult)
+				return null;
+
+			if (result.IsCompileTimeConstant)
+				return null;
+
+			startOffset = editor.LocationToOffset (node.StartLocation.Line, node.StartLocation.Column);
+
+			if (result is InvocationResolveResult) {
+				var ir = (InvocationResolveResult) result;
+				if (ir.Member.Name == ".ctor") {
+					// if the user is hovering over something like "new Abc (...)", we want to show them type information for Abc
+					return ir.Member.DeclaringType.FullName;
+				}
+
+				// do not support general method invocation for tooltips because it could cause side-effects
+				return null;
+			} else if (result is LocalResolveResult) {
+				if (node is ParameterDeclaration) {
+					// user is hovering over a method parameter, but we don't want to include the parameter type
+					var param = (ParameterDeclaration) node;
+
+					return GetIdentifierName (editor, param.NameToken, out startOffset);
+				}
+
+				if (node is VariableInitializer) {
+					// user is hovering over something like "int fubar = 5;", but we don't want the expression to include the " = 5"
+					var variable = (VariableInitializer) node;
+
+					return GetIdentifierName (editor, variable.NameToken, out startOffset);
+				}
+			} else if (result is MemberResolveResult) {
+				var mr = (MemberResolveResult) result;
+
+				if (node is PropertyDeclaration) {
+					var prop = (PropertyDeclaration) node;
+					var name = GetIdentifierName (editor, prop.NameToken, out startOffset);
+
+					// if the property is static, then we want to return "Full.TypeName.Property"
+					if (prop.Modifiers.HasFlag (Modifiers.Static))
+						return mr.Member.DeclaringType.FullName + "." + name;
+
+					// otherwise we want to return "this.Property" so that it won't conflict with anything else in the local scope
+					return "this." + name;
+				}
+
+				if (node is FieldDeclaration) {
+					var field = (FieldDeclaration) node;
+					var name = GetIdentifierName (editor, field.NameToken, out startOffset);
+
+					// if the field is static, then we want to return "Full.TypeName.Field"
+					if (field.Modifiers.HasFlag (Modifiers.Static))
+						return mr.Member.DeclaringType.FullName + "." + name;
+
+					// otherwise we want to return "this.Field" so that it won't conflict with anything else in the local scope
+					return "this." + name;
+				}
+
+				if (node is VariableInitializer) {
+					// user is hovering over a field declaration that includes initialization
+					var variable = (VariableInitializer) node;
+					var name = GetIdentifierName (editor, variable.NameToken, out startOffset);
+
+					// walk up the AST to find the FieldDeclaration so that we can determine if it is static or not
+					var field = variable.GetParent<FieldDeclaration> ();
+
+					// if the field is static, then we want to return "Full.TypeName.Field"
+					if (field.Modifiers.HasFlag (Modifiers.Static))
+						return mr.Member.DeclaringType.FullName + "." + name;
+
+					// otherwise we want to return "this.Field" so that it won't conflict with anything else in the local scope
+					return "this." + name;
+				}
+
+				if (node is NamedExpression) {
+					// user is hovering over 'Property' in an expression like: var fubar = new Fubar () { Property = baz };
+					var variable = node.GetParent<VariableInitializer> ();
+					if (variable != null) {
+						var variableName = GetIdentifierName (editor, variable.NameToken, out startOffset);
+						var name = GetIdentifierName (editor, ((NamedExpression) node).NameToken, out startOffset);
+
+						return variableName + "." + name;
+					}
+				}
+			} else if (result is TypeResolveResult) {
+				return ((TypeResolveResult) result).Type.FullName;
+			}
+
+			return editor.GetTextBetween (node.StartLocation, node.EndLocation);
+		}
+
+		static bool TryResolveAt (Document doc, DocumentLocation loc, out ResolveResult result, out AstNode node)
+		{
+			if (doc == null)
+				throw new ArgumentNullException ("doc");
+
+			result = null;
+			node = null;
+
+			var parsedDocument = doc.ParsedDocument;
+			if (parsedDocument == null)
+				return false;
+
+			var unit = parsedDocument.GetAst<SyntaxTree> ();
+			var parsedFile = parsedDocument.ParsedFile as CSharpUnresolvedFile;
+
+			if (unit == null || parsedFile == null)
+				return false;
+
+			try {
+				result = ResolveAtLocation.Resolve (new Lazy<ICompilation> (() => doc.Compilation), parsedFile, unit, loc, out node);
+				if (result == null || node is Statement)
+					return false;
+			} catch {
+				return false;
+			}
+
+			return true;
+		}
+
+		string IDebuggerExpressionResolver.ResolveExpression (TextEditorData editor, Document doc, int offset, out int startOffset)
+		{
+			ResolveResult result;
+			AstNode node;
+
+			var loc = editor.OffsetToLocation (offset);
+			if (!TryResolveAt (doc, loc, out result, out node)) {
+				startOffset = -1;
+				return null;
+			}
+
+			return ResolveExpression (editor, result, node, out startOffset);
+		}
+
+		#endregion
 		
 		#region TypeSystemSegmentTree
 
@@ -1384,37 +1555,37 @@ namespace MonoDevelop.CSharp.Completion
 					return null;
 				return seg;
 			}
+
 			
-			
-			internal static TypeSystemSegmentTree Create (MonoDevelop.Ide.Gui.Document document)
+			internal static TypeSystemSegmentTree Create (ParsedDocument parsedDocument, TextEditorData textEditorData)
 			{
 				TypeSystemSegmentTree result = new TypeSystemSegmentTree ();
 				
-				foreach (var type in document.ParsedDocument.TopLevelTypeDefinitions)
-					AddType (document, result, type);
+				foreach (var type in parsedDocument.TopLevelTypeDefinitions)
+					AddType (textEditorData, result, type);
 				
 				return result;
 			}
 			
-			static void AddType (MonoDevelop.Ide.Gui.Document document, TypeSystemSegmentTree result, IUnresolvedTypeDefinition type)
+			static void AddType (TextEditorData textEditorData, TypeSystemSegmentTree result, IUnresolvedTypeDefinition type)
 			{
-				int offset = document.Editor.LocationToOffset (type.Region.Begin);
-				int endOffset = type.Region.End.IsEmpty ? int.MaxValue : document.Editor.LocationToOffset (type.Region.End);
+				int offset = textEditorData.LocationToOffset (type.Region.Begin);
+				int endOffset = type.Region.End.IsEmpty ? int.MaxValue : textEditorData.LocationToOffset (type.Region.End);
 				if (endOffset < 0)
 					endOffset = int.MaxValue;
 				result.Add (new TypeSystemTreeSegment (offset, endOffset - offset, type));
 				foreach (var entity in type.Members) {
 					if (entity.IsSynthetic)
 						continue;
-					offset = document.Editor.LocationToOffset (entity.Region.Begin);
-					endOffset = document.Editor.LocationToOffset (entity.Region.End);
+					offset = textEditorData.LocationToOffset (entity.Region.Begin);
+					endOffset = textEditorData.LocationToOffset (entity.Region.End);
 					if (endOffset < 0)
 						endOffset = int.MaxValue;
 					result.Add (new TypeSystemTreeSegment (offset, endOffset - offset, entity));
 				}
 				
 				foreach (var nested in type.NestedTypes)
-					AddType (document, result, nested);
+					AddType (textEditorData, result, nested);
 			}
 		}
 		
@@ -1448,20 +1619,23 @@ namespace MonoDevelop.CSharp.Completion
 
 		class CompletionContextProvider : ICompletionContextProvider
 		{
-			MonoDevelop.Ide.Gui.Document document;
-			TypeSystemSegmentTree validTypeSystemSegmentTree;
-			TypeSystemSegmentTree unstableTypeSystemSegmentTree;
+			readonly ParsedDocument parsedDocument;
+			readonly TextEditorData textEditorData;
+			readonly TypeSystemSegmentTree validTypeSystemSegmentTree;
+			readonly TypeSystemSegmentTree unstableTypeSystemSegmentTree;
 
-			public CompletionContextProvider (MonoDevelop.Ide.Gui.Document document, TypeSystemSegmentTree validTypeSystemSegmentTree, TypeSystemSegmentTree unstableTypeSystemSegmentTree)
+			public CompletionContextProvider (ParsedDocument parsedDocument, TextEditorData textEditorData,
+				TypeSystemSegmentTree validTypeSystemSegmentTree, TypeSystemSegmentTree unstableTypeSystemSegmentTree)
 			{
-				this.document = document;
+				this.parsedDocument = parsedDocument;
+				this.textEditorData = textEditorData;
 				this.validTypeSystemSegmentTree = validTypeSystemSegmentTree;
 				this.unstableTypeSystemSegmentTree = unstableTypeSystemSegmentTree;
 			}
 
 			IList<string> ICompletionContextProvider.ConditionalSymbols {
 				get {
-					return document.ParsedDocument.GetAst<SyntaxTree> ().ConditionalSymbols;
+					return parsedDocument.GetAst<SyntaxTree> ().ConditionalSymbols;
 				}
 			}
 
@@ -1500,27 +1674,27 @@ namespace MonoDevelop.CSharp.Completion
 			{
 				int startOffset;
 				if (currentMember != null && currentType != null && currentType.Kind != TypeKind.Enum) {
-					startOffset = document.Editor.LocationToOffset(currentMember.Region.Begin);
+					startOffset = textEditorData.LocationToOffset(currentMember.Region.Begin);
 				} else if (currentType != null) {
-					startOffset = document.Editor.LocationToOffset(currentType.Region.Begin);
+					startOffset = textEditorData.LocationToOffset(currentType.Region.Begin);
 				} else {
 					startOffset = 0;
 				}
 				while (startOffset > 0) {
-					char ch = document.Editor.GetCharAt(startOffset - 1);
+					char ch = textEditorData.GetCharAt(startOffset - 1);
 					if (ch != ' ' && ch != '\t') {
 						break;
 					}
 					--startOffset;
 				}
-				return Tuple.Create (caretOffset > startOffset ? document.Editor.GetTextAt (startOffset, caretOffset - startOffset) : "", 
-				                     (TextLocation)document.Editor.OffsetToLocation (startOffset));
+				return Tuple.Create (caretOffset > startOffset ? textEditorData.GetTextAt (startOffset, caretOffset - startOffset) : "", 
+				                     (TextLocation)textEditorData.OffsetToLocation (startOffset));
 			}
 
 
 			CSharpAstResolver ICompletionContextProvider.GetResolver (CSharpResolver resolver, AstNode rootNode)
 			{
-				return new CSharpAstResolver (resolver, rootNode, document.ParsedDocument.ParsedFile as CSharpUnresolvedFile);
+				return new CSharpAstResolver (resolver, rootNode, parsedDocument.ParsedFile as CSharpUnresolvedFile);
 			}
 		}
 	}

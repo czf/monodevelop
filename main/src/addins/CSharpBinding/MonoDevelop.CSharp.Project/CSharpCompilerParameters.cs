@@ -48,7 +48,7 @@ namespace MonoDevelop.CSharp.Project
 	/// <summary>
 	/// This class handles project specific compiler parameters
 	/// </summary>
-	public class CSharpCompilerParameters: ConfigurationParameters
+	public class CSharpCompilerParameters: DotNetConfigurationParameters
 	{
 		// Configuration parameters
 		
@@ -189,14 +189,6 @@ namespace MonoDevelop.CSharp.Project
 			else
 				definesymbols = string.Empty;
 		}
-
-		[Obsolete ("Use GetDefineSymbols")]
-		public ReadOnlyCollection<string> AllDefineSymbols
-		{ 
-			get { 
-				return new ReadOnlyCollection<string> (GetDefineSymbols ().ToArray ());
-			} 
-		}
 		
 		public string DefineSymbols {
 			get {
@@ -282,7 +274,7 @@ namespace MonoDevelop.CSharp.Project
 			}
 		}
 
-		public bool NoStdLib {
+		public override bool NoStdLib {
 			get {
 				return noStdLib;
 			}

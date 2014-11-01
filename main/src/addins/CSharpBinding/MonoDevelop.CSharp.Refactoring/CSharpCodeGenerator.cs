@@ -892,7 +892,7 @@ namespace MonoDevelop.CSharp.Refactoring
 		static bool InsertUsingAfter (AstNode node)
 		{
 			return node is NewLineNode && IsCommentOrUsing (node.GetNextSibling (s => !(s is NewLineNode))) ||
-				IsCommentOrUsing (node);
+				IsCommentOrUsing (node) || (node is PreProcessorDirective);
 		}
 
 		static bool IsCommentOrUsing (AstNode node)
@@ -944,7 +944,7 @@ namespace MonoDevelop.CSharp.Refactoring
 			int offset = 0;
 			if (node != null) {
 				var loc = InsertUsingAfter (node) ? node.EndLocation : node.StartLocation;
-				offset = doc.Editor.LocationToOffset (loc);
+				offset = Math.Max (0, doc.Editor.LocationToOffset (loc));
 			}
 			
 			lines = policy.BlankLinesAfterUsings;

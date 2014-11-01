@@ -49,8 +49,8 @@ namespace VersionControl.Subversion.Unix.Tests
 		[SetUp]
 		public override void Setup ()
 		{
-			RootUrl = new FilePath (FileService.CreateTempDirectory ());
-			RepoLocation = "file://" + RootUrl + "/repo";
+			RemotePath = new FilePath (FileService.CreateTempDirectory ());
+			RemoteUrl = "file://" + RemotePath + "/repo";
 			base.Setup ();
 		}
 
@@ -72,17 +72,10 @@ namespace VersionControl.Subversion.Unix.Tests
 @@ -0,0 +1 @@
 +text
 ";
-			Assert.AreEqual (difftext, Repo.GenerateDiff (RootCheckout + "testfile", Repo.GetVersionInfo (RootCheckout + "testfile", VersionInfoQueryFlags.IgnoreCache)).Content);
+			Assert.AreEqual (difftext, Repo.GenerateDiff (LocalPath + "testfile", Repo.GetVersionInfo (LocalPath + "testfile", VersionInfoQueryFlags.IgnoreCache)).Content);
 		}
 
 		// Tests that fail due to Subversion giving wrong data.
-		[Test]
-		[Ignore ("Fix Subversion")]
-		public override void MovesFile ()
-		{
-			base.MovesFile ();
-		}
-
 		[Test]
 		[Ignore ("Fix Subversion")]
 		public override void MovesDirectory ()
@@ -106,7 +99,7 @@ namespace VersionControl.Subversion.Unix.Tests
 
 		protected override void PostLock ()
 		{
-			string added = RootCheckout + "testfile";
+			string added = LocalPath + "testfile";
 			Assert.Throws<Exception> (delegate {
 				File.WriteAllText (added, "text");
 			});
@@ -121,7 +114,7 @@ namespace VersionControl.Subversion.Unix.Tests
 
 		protected override void PostUnlock ()
 		{
-			string added = RootCheckout + "testfile";
+			string added = LocalPath + "testfile";
 			Assert.DoesNotThrow (delegate {
 				File.WriteAllText (added, "text");
 			});

@@ -47,6 +47,7 @@ using MonoDevelop.Ide.Gui;
 using MonoDevelop.Ide.Commands;
 using MonoDevelop.Ide.Desktop;
 using MonoDevelop.MacInterop;
+using MonoDevelop.Components;
 using MonoDevelop.Components.MainToolbar;
 using MonoDevelop.MacIntegration.MacMenu;
 using MonoDevelop.Components.Extensions;
@@ -90,6 +91,7 @@ namespace MonoDevelop.MacIntegration
 			CheckGtkVersion (2, 24, 14);
 
 			Xwt.Toolkit.CurrentEngine.RegisterBackend<IExtendedTitleBarWindowBackend,ExtendedTitleBarWindowBackend> ();
+			Xwt.Toolkit.CurrentEngine.RegisterBackend<IExtendedTitleBarDialogBackend,ExtendedTitleBarDialogBackend> ();
 		}
 
 		static void CheckGtkVersion (uint major, uint minor, uint micro)
@@ -199,6 +201,35 @@ namespace MonoDevelop.MacIntegration
 			}
 			mimeTimer.EndTiming ();
 			return map;
+		}
+
+		public override bool ShowContextMenu (CommandManager commandManager, Gtk.Widget widget, double x, double y, CommandEntrySet entrySet, object initialCommandTarget = null)
+		{
+			Gtk.Application.Invoke (delegate {
+				// Explicitly release the grab because the menu is shown on the mouse position, and the widget doesn't get the mouse release event
+				Gdk.Pointer.Ungrab (Gtk.Global.CurrentEventTime);
+				var menu = new MDMenu (commandManager, entrySet, CommandSource.ContextMenu, initialCommandTarget);
+				var nsview = MacInterop.GtkQuartz.GetView (widget);
+				var toplevel = widget.Toplevel as Gtk.Window;
+				int trans_x, trans_y;
+				widget.TranslateCoordinates (toplevel, (int)x, (int)y, out trans_x, out trans_y);
+
+				// Window coordinates in gtk are the same for cocoa, with the exception of the Y coordinate, that has to be flipped.
+				var pt = new PointF ((float)trans_x, (float)trans_y);
+				int w,h;
+				toplevel.GetSize (out w, out h);
+				pt.Y = h - pt.Y;
+
+				var tmp_event = NSEvent.MouseEvent (NSEventType.LeftMouseDown,
+					pt,
+					0, 0,
+					MacInterop.GtkQuartz.GetWindow (toplevel).WindowNumber,
+					null, 0, 0, 0);
+
+				NSMenu.PopUpContextMenu (menu, tmp_event, nsview);
+			});
+
+			return true;
 		}
 		
 		public override bool SetGlobalMenu (CommandManager commandManager, string commandMenuAddinPath, string appMenuAddinPath)
@@ -318,12 +349,13 @@ namespace MonoDevelop.MacIntegration
 						e.Handled = true;
 					}
 				};
-				
+
 				ApplicationEvents.OpenDocuments += delegate (object sender, ApplicationDocumentEventArgs e) {
 					//OpenFiles may pump the mainloop, but can't do that from an AppleEvent, so use a brief timeout
 					GLib.Timeout.Add (10, delegate {
-						IdeApp.OpenFiles (e.Documents.Select (doc =>
-							new FileOpenInformation (doc.Key, doc.Value, 1, OpenDocumentOptions.Default)));
+						IdeApp.OpenFiles (e.Documents.Select (
+							doc => new FileOpenInformation (doc.Key, doc.Value, 1, OpenDocumentOptions.DefaultInternal))
+						);
 						return false;
 					});
 					e.Handled = true;
@@ -348,8 +380,8 @@ namespace MonoDevelop.MacIntegration
 								if (!Int32.TryParse (qs ["column"], out column))
 									column = 1;
 
-								return new FileOpenInformation (fileUri.AbsolutePath,
-									line, column, OpenDocumentOptions.Default);
+								return new FileOpenInformation (Uri.UnescapeDataString(fileUri.AbsolutePath),
+									line, column, OpenDocumentOptions.DefaultInternal);
 							} catch (Exception ex) {
 								LoggingService.LogError ("Invalid TextMate URI: " + url, ex);
 								return null;
@@ -489,11 +521,11 @@ namespace MonoDevelop.MacIntegration
 			return scaled;
 		}
 		
-		protected override Gdk.Pixbuf OnGetPixbufForFile (string filename, Gtk.IconSize size)
+		protected override Xwt.Drawing.Image OnGetIconForFile (string filename)
 		{
 			//this only works on MacOS 10.6.0 and greater
 			if (systemVersion < 0x1060)
-				return base.OnGetPixbufForFile (filename, size);
+				return base.OnGetIconForFile (filename);
 			
 			NSImage icon = null;
 			
@@ -506,7 +538,7 @@ namespace MonoDevelop.MacIntegration
 			}
 			
 			if (icon == null) {
-				return base.OnGetPixbufForFile (filename, size);
+				return base.OnGetIconForFile (filename);
 			}
 			
 			int w, h;
@@ -514,7 +546,8 @@ namespace MonoDevelop.MacIntegration
 				w = h = 22;
 			}
 				
-			return GetPixbufFromNSImage (icon, w, h) ?? base.OnGetPixbufForFile (filename, size);
+			var res = GetPixbufFromNSImage (icon, w, h);
+			return res != null ? res.ToXwtImage () : base.OnGetIconForFile (filename);
 		}
 		
 		public override IProcessAsyncOperation StartConsoleProcess (string command, string arguments, string workingDirectory,
@@ -734,7 +767,52 @@ namespace MonoDevelop.MacIntegration
 		{
 			var toplevels = GtkQuartz.GetToplevels ();
 
-			return toplevels.Any (t => t.Key.IsVisible && (t.Value == null || t.Value.Modal) && !t.Key.DebugDescription.StartsWith("<NSStatusBarWindow"));
+			// When we're looking for modal windows that don't belong to GTK, exclude
+			// NSStatusBarWindow (which is visible on Mavericks when we're in fullscreen) and
+			// NSToolbarFullscreenWindow (which is visible on Yosemite in fullscreen).
+			return toplevels.Any (t => t.Key.IsVisible && (t.Value == null || t.Value.Modal) &&
+				!(t.Key.DebugDescription.StartsWith("<NSStatusBarWindow") ||
+				  t.Key.DebugDescription.StartsWith ("<NSToolbarFullScreenWindow")));
+		}
+
+		public override void AddChildWindow (Gtk.Window parent, Gtk.Window child)
+		{
+			NSWindow w = GtkQuartz.GetWindow (parent);
+			child.Realize ();
+			NSWindow overlay = GtkQuartz.GetWindow (child);
+			overlay.SetExcludedFromWindowsMenu (true);
+			w.AddChildWindow (overlay, NSWindowOrderingMode.Above);
+		}
+
+		public override void PlaceWindow (Gtk.Window window, int x, int y, int width, int height)
+		{
+			if (window.GdkWindow == null)
+				return; // Not yet realized
+
+			NSWindow w = GtkQuartz.GetWindow (window);
+			var dr = FromDesktopRect (new Gdk.Rectangle (x, y, width, height));
+			var r = w.FrameRectFor (dr);
+			w.SetFrame (r, true);
+			base.PlaceWindow (window, x, y, width, height);
+		}
+
+		static RectangleF FromDesktopRect (Gdk.Rectangle r)
+		{
+			var desktopBounds = CalcDesktopBounds ();
+			r.Y = desktopBounds.Height - r.Y - r.Height;
+			if (desktopBounds.Y < 0)
+				r.Y += desktopBounds.Y;
+			return new RectangleF (desktopBounds.X + r.X, r.Y, r.Width, r.Height);
+		}
+
+		static Gdk.Rectangle CalcDesktopBounds ()
+		{
+			var desktopBounds = new Gdk.Rectangle ();
+			foreach (var s in NSScreen.Screens) {
+				var r = s.Frame;
+				desktopBounds = desktopBounds.Union (new Gdk.Rectangle ((int)r.X, (int)r.Y, (int)r.Width, (int)r.Height));
+			}
+			return desktopBounds;
 		}
 	}
 }

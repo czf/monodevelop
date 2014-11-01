@@ -242,16 +242,33 @@ namespace MonoDevelop.SourceEditor
 
 			void FancyFeaturesChanged (object sender, EventArgs e)
 			{
+				if (!QuickTaskStrip.MergeScrollBarAndQuickTasks)
+					return;
 				if (QuickTaskStrip.EnableFancyFeatures) {
 					GtkWorkarounds.SetOverlayScrollbarPolicy (scrolledWindow, PolicyType.Automatic, PolicyType.Never);
+					SetSuppressScrollbar (true);
+				} else {
+					GtkWorkarounds.SetOverlayScrollbarPolicy (scrolledWindow, PolicyType.Automatic, PolicyType.Automatic);
+					SetSuppressScrollbar (false);
+				}
+				QueueResize ();
+			}
+
+			bool suppressScrollbar;
+
+			void SetSuppressScrollbar (bool value)
+			{
+				if (suppressScrollbar == value)
+					return;
+				suppressScrollbar = value;
+
+				if (suppressScrollbar) {
 					scrolledWindow.VScrollbar.SizeRequested += SuppressSize;
 					scrolledWindow.VScrollbar.ExposeEvent += SuppressExpose;
 				} else {
-					GtkWorkarounds.SetOverlayScrollbarPolicy (scrolledWindow, PolicyType.Automatic, PolicyType.Automatic);
 					scrolledWindow.VScrollbar.SizeRequested -= SuppressSize;
 					scrolledWindow.VScrollbar.ExposeEvent -= SuppressExpose;
 				}
-				QueueResize ();
 			}
 
 			[GLib.ConnectBefore]
@@ -294,6 +311,7 @@ namespace MonoDevelop.SourceEditor
 				if (scrolledWindow.Child != null)
 					RemoveEvents ();
 
+				SetSuppressScrollbar (false);
 				QuickTaskStrip.EnableFancyFeatures.Changed -= FancyFeaturesChanged;
 				scrolledWindow.ButtonPressEvent -= PrepareEvent;
 				base.OnDestroyed ();
@@ -364,6 +382,10 @@ namespace MonoDevelop.SourceEditor
 			vbox.PackStart (mainsw, true, true, 0);
 			
 			textEditorData = textEditor.GetTextEditorData ();
+			textEditorData.EditModeChanged += delegate {
+				KillWidgets ();
+			};
+
 			ResetFocusChain ();
 			
 			UpdateLineCol ();
@@ -1481,21 +1503,29 @@ namespace MonoDevelop.SourceEditor
 				}
 			}
 		}
-		
-		public void ToggleCodeComment ()
+
+		bool TryGetLineCommentTag (out string commentTag)
 		{
 			var mode = Document.SyntaxMode as SyntaxMode;
-			if (mode == null)
-				return;
-			bool comment = false;
 			List<string> lineComments;
-			if (!mode.Properties.TryGetValue ("LineComment", out lineComments) || lineComments.Count == 0) {
+			if (mode == null || !mode.Properties.TryGetValue ("LineComment", out lineComments) || lineComments.Count == 0) {
+				commentTag = null;
+				return false;
+			}
+			commentTag = lineComments [0];
+			return true;
+		}
+
+		public void ToggleCodeComment ()
+		{
+			string commentTag;
+			if (!TryGetLineCommentTag (out commentTag)) {
 				ToggleCodeCommentWithBlockComments ();
 				return;
 			}
-			string commentTag = lineComments [0];
 
-			foreach (DocumentLine line in this.textEditor.SelectedLines) {
+			bool comment = false;
+			foreach (var line in textEditor.SelectedLines) {
 				if (line.GetIndentation (TextEditor.Document).Length == line.Length)
 					continue;
 				string text = Document.GetTextAt (line);
@@ -1505,13 +1535,30 @@ namespace MonoDevelop.SourceEditor
 					break;
 				}
 			}
+
 			if (comment) {
 				CommentSelectedLines (commentTag);
 			} else {
 				UncommentSelectedLines (commentTag);
 			}
 		}
-		
+
+		public void AddCodeComment ()
+		{
+			string commentTag;
+			if (!TryGetLineCommentTag (out commentTag))
+				return;
+			CommentSelectedLines (commentTag);
+		}
+
+		public void RemoveCodeComment ()
+		{
+			string commentTag;
+			if (!TryGetLineCommentTag (out commentTag))
+				return;
+			UncommentSelectedLines (commentTag);
+		}
+
 		public void OnUpdateToggleErrorTextMarker (CommandInfo info)
 		{
 			DocumentLine line = TextEditor.Document.GetLine (TextEditor.Caret.Line);
@@ -1532,8 +1579,6 @@ namespace MonoDevelop.SourceEditor
 			if (marker != null) {
 				marker.IsVisible = !marker.IsVisible;
 				TextEditor.QueueDraw ();
-				MonoDevelop.Ide.Gui.Pads.ErrorListPad pad = IdeApp.Workbench.GetPad<MonoDevelop.Ide.Gui.Pads.ErrorListPad> ().Content as MonoDevelop.Ide.Gui.Pads.ErrorListPad;
-				pad.Control.QueueDraw ();
 			}
 		}
 		
@@ -1564,12 +1609,6 @@ namespace MonoDevelop.SourceEditor
 	//						TextEditor.SelectionAnchor = anchorLine.Offset;
 						}
 					}
-				}
-				
-				if (TextEditor.Caret.Column != 0) {
-					TextEditor.Caret.PreserveSelection = true;
-					TextEditor.Caret.Column += commentTag.Length;
-					TextEditor.Caret.PreserveSelection = false;
 				}
 				
 				if (TextEditor.IsSomethingSelected) 
@@ -1609,12 +1648,6 @@ namespace MonoDevelop.SourceEditor
 					} else {
 						TextEditor.SelectionAnchor = System.Math.Min (anchorLine.Offset + anchorLine.Length, System.Math.Max (anchorLine.Offset, anchorLine.Offset + anchorColumn - last));
 					}
-				}
-				
-				if (TextEditor.Caret.Column != DocumentLocation.MinColumn) {
-					TextEditor.Caret.PreserveSelection = true;
-					TextEditor.Caret.Column = System.Math.Max (DocumentLocation.MinColumn, TextEditor.Caret.Column - last);
-					TextEditor.Caret.PreserveSelection = false;
 				}
 				
 				if (TextEditor.IsSomethingSelected) 

@@ -27,24 +27,23 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using MonoDevelop.Debugger;
-using MonoDevelop.Core;
-using MonoDevelop.Core.Execution;
-using MonoDevelop.AspNet;
 using Mono.Debugging.Client;
-using MonoDevelop.Debugger.Soft;
-using System.Net;
-using MonoDevelop.Core.Assemblies;
 using Mono.Debugging.Soft;
+using MonoDevelop.AspNet.Execution;
+using MonoDevelop.Core;
+using MonoDevelop.Core.Assemblies;
+using MonoDevelop.Core.Execution;
+using MonoDevelop.Debugger;
+using MonoDevelop.Debugger.Soft;
 
 namespace MonoDevelop.Debugger.Soft.AspNet
 {
-	public class AspNetSoftDebuggerEngine: IDebuggerEngine
+	public class AspNetSoftDebuggerEngine: DebuggerEngineBackend
 	{
-		public bool CanDebugCommand (ExecutionCommand command)
+		public override bool CanDebugCommand (ExecutionCommand cmd)
 		{
-			var cmd = command as AspNetExecutionCommand;
-			return cmd != null && SoftDebuggerEngine.CanDebugRuntime (cmd.TargetRuntime);
+			var command = cmd as AspNetExecutionCommand;
+			return command != null && SoftDebuggerEngine.CanDebugRuntime (command.TargetRuntime);
 		}
 		
 		FilePath GetFxDir (MonoTargetRuntime runtime, ClrVersion version)
@@ -65,7 +64,7 @@ namespace MonoDevelop.Debugger.Soft.AspNet
 			throw new InvalidOperationException (string.Format ("Unknown runtime version '{0}'", version));
 		}
 		
-		public DebuggerStartInfo CreateDebuggerStartInfo (ExecutionCommand command)
+		public override DebuggerStartInfo CreateDebuggerStartInfo (ExecutionCommand command)
 		{
 			var cmd = (AspNetExecutionCommand) command;
 			var evars = new Dictionary<string, string>(cmd.EnvironmentVariables);
@@ -104,14 +103,9 @@ namespace MonoDevelop.Debugger.Soft.AspNet
 			return startInfo;
 		}
 
-		public DebuggerSession CreateSession ()
+		public override DebuggerSession CreateSession ()
 		{
 			return new SoftDebuggerSession ();
-		}
-		
-		public ProcessInfo[] GetAttachableProcesses ()
-		{
-			return new ProcessInfo[0];
 		}
 	}
 }

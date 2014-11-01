@@ -40,10 +40,9 @@ namespace MonoDevelop.Ide.Gui
 		public CommonTextEditorOptions ()
 		{
 			PropertyService.PropertyChanged += PropertyServiceChanged;
-			base.FontName = PropertyService.Get ("FontName", MonoDevelop.Ide.DesktopService.DefaultMonospaceFont);
+			base.FontName = PropertyService.Get ("FontName", FontService.MonospaceFontName);
 			base.ColorScheme = IdeApp.Preferences.ColorScheme;
 			FontService.RegisterFontChangedCallback ("Editor", UpdateFont);
-			FontService.RegisterFontChangedCallback ("Editor(Gutter)", UpdateFont);
 		}
 		
 		public override void Dispose ()

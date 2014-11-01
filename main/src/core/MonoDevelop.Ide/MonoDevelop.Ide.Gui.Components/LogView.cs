@@ -36,24 +36,27 @@ using System.IO;
 using System.Text.RegularExpressions;
 using MonoDevelop.Ide.Fonts;
 using MonoDevelop.Components.Commands;
+using MonoDevelop.Ide.Commands;
+using System.Linq;
 
 namespace MonoDevelop.Ide.Gui.Components
 {
-	public class LogView : MonoDevelop.Components.CompactScrolledWindow
+	public class LogView : Gtk.VBox
 	{
-		Gtk.TextBuffer buffer;
-		Gtk.TextView textEditorControl;
+		TextBuffer buffer;
+		TextView textEditorControl;
 		TextMark endMark;
 
 		TextTag tag;
 		TextTag bold;
 		TextTag errorTag;
 		TextTag consoleLogTag;
+		TextTag debugTag;
 		int ident = 0;
 		List<TextTag> tags = new List<TextTag> ();
 		Stack<string> indents = new Stack<string> ();
 
-		Queue<QueuedUpdate> updates = new Queue<QueuedUpdate> ();
+		readonly Queue<QueuedUpdate> updates = new Queue<QueuedUpdate> ();
 		QueuedTextWrite lastTextWrite;
 		GLib.TimeoutHandler outputDispatcher;
 		bool outputDispatcherRunning = false;
@@ -66,14 +69,13 @@ namespace MonoDevelop.Ide.Gui.Components
 		/// </summary>
 		public class LogTextView : TextView
 		{
-			public LogTextView (Gtk.TextBuffer buf) : base (buf)
+			public LogTextView (TextBuffer buf) : base (buf)
 			{
 			}
 
 			public LogTextView () 
 			{
 			}
-
 
 			static readonly Regex lineRegex = new Regex ("\\b.*\\s(?<file>(\\w:)?[/\\\\].*):(\\w+\\s)?(?<line>\\d+)\\.?\\s*$", RegexOptions.Compiled);
 
@@ -83,11 +85,8 @@ namespace MonoDevelop.Ide.Gui.Components
 				if (match.Success) {
 					file = match.Groups["file"].Value;
 					string lineNumberText = match.Groups["line"].Value;
-					try {
-						line = int.Parse (lineNumberText);
+					if (int.TryParse (lineNumberText, out line))
 						return true;
-					} catch (Exception) {
-					}
 				}
 				file = null;
 				line = 0;
@@ -97,11 +96,11 @@ namespace MonoDevelop.Ide.Gui.Components
 			protected override bool OnButtonPressEvent (Gdk.EventButton evnt)
 			{
 				if (evnt.Type == Gdk.EventType.TwoButtonPress) {
-					var cursorPos = base.Buffer.GetIterAtOffset (this.Buffer.CursorPosition);
-
+					var cursorPos = Buffer.GetIterAtOffset (Buffer.CursorPosition);
 					TextIter iterStart;
 					TextIter iterEnd;
 					string lineText;
+
 					try {
 						iterStart = Buffer.GetIterAtLine (cursorPos.Line);
 						iterEnd = Buffer.GetIterAtOffset (iterStart.Offset + iterStart.CharsInLine);
@@ -123,32 +122,40 @@ namespace MonoDevelop.Ide.Gui.Components
 								fileExists = false;
 							}
 							if (fileExists)
-								IdeApp.Workbench.OpenDocument (file, lineNumber, 1);
+								IdeApp.Workbench.OpenDocument (file, null, lineNumber, 1);
 						}
 					}
 				}
 				return base.OnButtonPressEvent (evnt);
 			}
 		}
+		HBox searchBox = new HBox ();
+		MonoDevelop.Components.SearchEntry searchEntry = new MonoDevelop.Components.SearchEntry ();
+		MonoDevelop.Components.CompactScrolledWindow scrollView = new MonoDevelop.Components.CompactScrolledWindow ();
 
 		public LogView ()
 		{
-			buffer = new Gtk.TextBuffer (new Gtk.TextTagTable ());
+			buffer = new TextBuffer (new TextTagTable ());
 			textEditorControl = new LogTextView (buffer);
 			textEditorControl.Editable = false;
 			
-			ShadowType = ShadowType.None;
-			Add (textEditorControl);
+			scrollView.ShadowType = ShadowType.None;
+			scrollView.Add (textEditorControl);
+			PackEnd (scrollView, true, true, 0);
 
 			bold = new TextTag ("bold");
-			bold.Weight = Pango.Weight.Bold;
+			bold.Weight = Weight.Bold;
 			buffer.TagTable.Add (bold);
 			
 			errorTag = new TextTag ("error");
-			errorTag.Foreground = "red";
-			errorTag.Weight = Pango.Weight.Bold;
+			errorTag.Foreground = "#dc3122";
+			errorTag.Weight = Weight.Bold;
 			buffer.TagTable.Add (errorTag);
-			
+
+			debugTag = new TextTag ("debug");
+			debugTag.Foreground = "#256ada";
+			buffer.TagTable.Add (debugTag);
+
 			consoleLogTag = new TextTag ("consoleLog");
 			consoleLogTag.Foreground = "darkgrey";
 			buffer.TagTable.Add (consoleLogTag);
@@ -164,6 +171,8 @@ namespace MonoDevelop.Ide.Gui.Components
 			IdeApp.Preferences.CustomOutputPadFontChanged += HandleCustomFontChanged;
 			
 			outputDispatcher = new GLib.TimeoutHandler (outputDispatchHandler);
+
+			InitSearchWidget ();
 		}
 
 		[CommandHandler (Ide.Commands.EditCommands.Copy)]
@@ -171,6 +180,7 @@ namespace MonoDevelop.Ide.Gui.Components
 		{
 			TextIter start;
 			TextIter end;
+
 			if (buffer.HasSelection && buffer.GetSelectionBounds (out start, out end)) {
 				var text = buffer.GetText (start, end, false);
 				var clipboard = Clipboard.Get (Gdk.Atom.Intern ("CLIPBOARD", false));
@@ -180,7 +190,198 @@ namespace MonoDevelop.Ide.Gui.Components
 				clipboard.Text = text;
 			}
 		}
-		
+
+		#region Searching
+		Button buttonSearchForward;
+		Button buttonSearchBackward;
+		Button closeButton;
+
+		static string currentSearchPattern;
+
+		void InitSearchWidget ()
+		{
+			searchBox.BorderWidth = 4;
+			searchBox.PackStart (new Label (GettextCatalog.GetString ("Search:")), false, false, 4);
+			searchBox.PackStart (searchEntry, true, true, 0);
+			closeButton = new Button ();
+			closeButton.CanFocus = true;
+			closeButton.Relief = ReliefStyle.None;
+			closeButton.Image = ImageService.GetImage ("gtk-close", IconSize.Menu);
+			closeButton.Clicked += delegate {
+				HideSearchBox ();
+			};
+			searchBox.PackEnd (closeButton, false, false, 0);
+
+			buttonSearchForward = new Button ();
+			buttonSearchForward.CanFocus = true;
+			buttonSearchForward.Relief = ReliefStyle.None;
+			buttonSearchForward.TooltipText = GettextCatalog.GetString ("Find next {0}", GetShortcut (SearchCommands.FindNext));
+			buttonSearchForward.Image = ImageService.GetImage ("gtk-go-down", IconSize.Menu);
+			buttonSearchForward.Clicked += delegate {
+				FindNext ();
+			};
+			searchBox.PackEnd (buttonSearchForward, false, false, 0);
+
+			buttonSearchBackward = new Button ();
+			buttonSearchBackward.CanFocus = true;
+			buttonSearchBackward.Relief = ReliefStyle.None;
+			buttonSearchBackward.TooltipText = GettextCatalog.GetString ("Find previous {0}", GetShortcut (SearchCommands.FindPrevious));
+			buttonSearchBackward.Image = ImageService.GetImage ("gtk-go-up", IconSize.Menu);
+			buttonSearchBackward.Clicked += delegate {
+				FindPrev ();
+			};
+			searchBox.PackEnd (buttonSearchBackward, false, false, 0);
+
+			searchEntry.Ready = true;
+			searchEntry.Visible = true;
+			searchEntry.Entry.KeyPressEvent += delegate (object o, KeyPressEventArgs args) {
+				switch (args.Event.Key) {
+				case Gdk.Key.Escape:
+					HideSearchBox ();
+					break;
+				}
+			};
+
+			textEditorControl.KeyPressEvent += delegate (object o, KeyPressEventArgs args) {
+				switch (args.Event.Key) {
+				case Gdk.Key.Escape:
+					HideSearchBox ();
+					break;
+				}
+			};
+			searchEntry.Entry.Changed += delegate {
+				currentSearchPattern = searchEntry.Entry.Text;
+			};
+			searchEntry.Entry.Activated += delegate {
+				FindNext ();
+			};
+		}
+
+		void UpdateSearchEntrySearchPattern ()
+		{
+			searchEntry.Entry.Text = currentSearchPattern ?? "";
+		}
+
+		void ShowSearchBox ()
+		{
+			UpdateSearchEntrySearchPattern ();
+			PackStart (searchBox, false, true, 0);
+			searchBox.ShowAll ();
+			searchEntry.Entry.GrabFocus ();
+		}
+
+		void HideSearchBox ()
+		{
+			Remove (searchBox);
+			textEditorControl.GrabFocus ();
+		}
+
+		[CommandHandler (SearchCommands.Find)]
+		void Find ()
+		{
+			ShowSearchBox ();
+		}
+
+		static StringComparison GetComparer ()
+		{
+			if (PropertyService.Get ("AutoSetPatternCasing", true)) {
+				if (currentSearchPattern != null && currentSearchPattern.Any (Char.IsUpper))
+					return StringComparison.Ordinal;
+			}
+
+			return StringComparison.OrdinalIgnoreCase;
+		}
+
+		[CommandHandler (SearchCommands.FindNext)]
+		void FindNext ()
+		{
+			if (string.IsNullOrEmpty (currentSearchPattern))
+				return;
+			int searchPosition = buffer.CursorPosition;
+			TextIter start;
+			TextIter end;
+
+			if (buffer.HasSelection && buffer.GetSelectionBounds (out start, out end))
+				searchPosition = end.Offset;
+
+			var comparer = GetComparer ();
+			var text = buffer.Text;
+			var idx = text.IndexOf (currentSearchPattern, searchPosition, comparer);
+			if (idx < 0) {
+				idx = text.IndexOf (currentSearchPattern, 0, searchPosition, comparer);
+			}
+
+			if (idx >= 0) {
+				var iter = buffer.GetIterAtOffset (idx + currentSearchPattern.Length);
+				buffer.PlaceCursor (iter);
+				buffer.SelectRange (buffer.GetIterAtOffset (idx), iter); 
+				textEditorControl.ScrollToIter (iter, 0, false, 0, 0);
+			}
+		}
+
+		[CommandHandler (SearchCommands.FindNextSelection)]
+		void FindNextSelection ()
+		{
+			SetSearchPatternToSelection ();
+			UpdateSearchEntrySearchPattern ();
+			FindNext ();
+		}
+
+		[CommandHandler (SearchCommands.FindPrevious)]
+		void FindPrev ()
+		{
+			if (string.IsNullOrEmpty (currentSearchPattern))
+				return;
+			int searchPosition = buffer.CursorPosition;
+			TextIter start;
+			TextIter end;
+
+			if (buffer.HasSelection && buffer.GetSelectionBounds (out start, out end))
+				searchPosition = start.Offset;
+
+			var comparer = GetComparer ();
+			var text = buffer.Text;
+			var idx = text.LastIndexOf (currentSearchPattern, searchPosition, comparer);
+			if (idx < 0) {
+				idx = text.LastIndexOf (currentSearchPattern, text.Length, text.Length - searchPosition, comparer);
+			}
+
+			if (idx >= 0) {
+				var iter = buffer.GetIterAtOffset (idx + currentSearchPattern.Length);
+				buffer.PlaceCursor (iter);
+				buffer.SelectRange (buffer.GetIterAtOffset (idx), iter); 
+				textEditorControl.ScrollToIter (iter, 0, false, 0, 0);
+			}
+
+		}
+
+		[CommandHandler (SearchCommands.FindPreviousSelection)]
+		void FindPreviousSelection ()
+		{
+			SetSearchPatternToSelection ();
+			UpdateSearchEntrySearchPattern ();
+			FindPrev ();
+		}
+
+		void SetSearchPatternToSelection ()
+		{
+			TextIter start;
+			TextIter end;
+
+			if (buffer.HasSelection && buffer.GetSelectionBounds (out start, out end))
+				currentSearchPattern = buffer.GetText (start, end, false);
+		}
+
+		static string GetShortcut (object commandId)
+		{
+			var key = IdeApp.CommandService.GetCommand (commandId).AccelKey;
+			if (string.IsNullOrEmpty (key))
+				return "";
+			var nextShortcut = KeyBindingManager.BindingToDisplayLabel (key, false);
+			return "(" + nextShortcut + ")";
+		}
+		#endregion
+
 		public LogViewProgressMonitor GetProgressMonitor ()
 		{
 			return new LogViewProgressMonitor (this);
@@ -204,7 +405,7 @@ namespace MonoDevelop.Ide.Gui.Components
 		
 		void UpdateCustomFont ()
 		{
-			textEditorControl.ModifyFont (IdeApp.Preferences.CustomOutputPadFont ?? FontService.DefaultMonospaceFontDescription);
+			textEditorControl.ModifyFont (IdeApp.Preferences.CustomOutputPadFont ?? FontService.MonospaceFont);
 		}
 		
 		//mechanism to to batch copy text when large amounts are being dumped
@@ -215,14 +416,16 @@ namespace MonoDevelop.Ide.Gui.Components
 				if (updates.Count == 0) {
 					outputDispatcherRunning = false;
 					return false;
-				} else if (!outputDispatcherRunning) {
+				}
+
+				if (!outputDispatcherRunning) {
 					updates.Clear ();
 					return false;
-				} else {
-					while (updates.Count > 0) {
-						QueuedUpdate up = updates.Dequeue ();
-						up.Execute (this);
-					}
+				}
+
+				while (updates.Count > 0) {
+					var up = updates.Dequeue ();
+					up.Execute (this);
 				}
 			}
 			return true;
@@ -248,20 +451,19 @@ namespace MonoDevelop.Ide.Gui.Components
 			} else
 				indents.Push (null);
 
-			if (name != null) {
+			if (name != null)
 				UnsafeAddText (Environment.NewLine + name + Environment.NewLine, bold);
-			}
 		}
 		
 		public void BeginTask (string name, int totalWork)
 		{
-			QueuedBeginTask bt = new QueuedBeginTask (name, totalWork);
+			var bt = new QueuedBeginTask (name, totalWork);
 			addQueuedUpdate (bt);
 		}
 		
 		public void EndTask ()
 		{
-			QueuedEndTask et = new QueuedEndTask ();
+			var et = new QueuedEndTask ();
 			addQueuedUpdate (et);
 		}
 		
@@ -282,7 +484,8 @@ namespace MonoDevelop.Ide.Gui.Components
 					}
 				}
 			}
-			QueuedTextWrite qtw = new QueuedTextWrite (text, null);
+
+			var qtw = new QueuedTextWrite (text, null);
 			addQueuedUpdate (qtw);
 		}
 		
@@ -294,32 +497,40 @@ namespace MonoDevelop.Ide.Gui.Components
 					return;
 				}
 			}
-			QueuedTextWrite w = new QueuedTextWrite (text, consoleLogTag);
+
+			var w = new QueuedTextWrite (text, consoleLogTag);
 			addQueuedUpdate (w);
 		}
 		
 		public void WriteError (string text)
 		{
-			QueuedTextWrite w = new QueuedTextWrite (text, errorTag);
+			var w = new QueuedTextWrite (text, errorTag);
 			addQueuedUpdate (w);
+		}
+
+		public void WriteDebug (int level, string category, string message)
+		{
+			//TODO: Give user ability to filter levels and categories
+			if (string.IsNullOrEmpty (category))
+				addQueuedUpdate (new QueuedTextWrite (message, debugTag));
+			else
+				addQueuedUpdate (new QueuedTextWrite (category + ": " + message, debugTag));
 		}
 		
 		protected void UnsafeAddText (string text, TextTag extraTag)
 		{
 			//don't allow the pad to hold more than MAX_BUFFER_LENGTH chars
 			int overrun = (buffer.CharCount + text.Length) - MAX_BUFFER_LENGTH;
+
 			if (overrun > 0) {
 				TextIter start = buffer.StartIter;
 				TextIter end = buffer.GetIterAtOffset (overrun);
 				buffer.Delete (ref start, ref end);
 			}
-			
+
+			bool scrollToEnd = scrollView.Vadjustment.Value >= scrollView.Vadjustment.Upper - 2 * scrollView.Vadjustment.PageSize;
 			TextIter it = buffer.EndIter;
-			ScrolledWindow window = textEditorControl.Parent as ScrolledWindow;
-			bool scrollToEnd = true;
-			if (window != null) {
-				scrollToEnd = window.Vadjustment.Value >= window.Vadjustment.Upper - 2 * window.Vadjustment.PageSize;
-			}
+
 			if (extraTag != null)
 				buffer.InsertWithTags (ref it, text, tag, extraTag);
 			else
@@ -364,15 +575,16 @@ namespace MonoDevelop.Ide.Gui.Components
 			IdeApp.Preferences.CustomOutputPadFontChanged -= HandleCustomFontChanged;
 		}
 		
-		private abstract class QueuedUpdate
+		abstract class QueuedUpdate
 		{
 			public abstract void Execute (LogView pad);
 		}
 		
-		private class QueuedTextWrite : QueuedUpdate
+		class QueuedTextWrite : QueuedUpdate
 		{
-			private System.Text.StringBuilder Text;
+			readonly System.Text.StringBuilder Text;
 			public TextTag Tag;
+
 			public override void Execute (LogView pad)
 			{
 				pad.UnsafeAddText (Text.ToString (), Tag);
@@ -392,7 +604,7 @@ namespace MonoDevelop.Ide.Gui.Components
 			}
 		}
 		
-		private class QueuedBeginTask : QueuedUpdate
+		class QueuedBeginTask : QueuedUpdate
 		{
 			public string Name;
 			public int TotalWork;
@@ -408,7 +620,7 @@ namespace MonoDevelop.Ide.Gui.Components
 			}
 		}
 		
-		private class QueuedEndTask : QueuedUpdate
+		class QueuedEndTask : QueuedUpdate
 		{
 			public override void Execute (LogView pad)
 			{
@@ -417,17 +629,18 @@ namespace MonoDevelop.Ide.Gui.Components
 		}
 	}
 
-	public class LogViewProgressMonitor : NullProgressMonitor, IConsole
+	public class LogViewProgressMonitor : NullProgressMonitor, IDebugConsole
 	{
 		LogView outputPad;
 		event EventHandler stopRequested;
 		
 		LogTextWriter logger = new LogTextWriter ();
 		LogTextWriter internalLogger = new LogTextWriter ();
+		LogTextWriter errorLogger = new LogTextWriter();
 		NotSupportedTextReader inputReader = new NotSupportedTextReader ();
 		
 		public LogView LogView {
-			get { return this.outputPad; }
+			get { return outputPad; }
 		}
 		
 		public LogViewProgressMonitor (LogView pad)
@@ -436,6 +649,7 @@ namespace MonoDevelop.Ide.Gui.Components
 			outputPad.Clear ();
 			logger.TextWritten += outputPad.WriteText;
 			internalLogger.TextWritten += outputPad.WriteConsoleLogText;
+			errorLogger.TextWritten += outputPad.WriteError;
 		}
 		
 		public override void BeginTask (string name, int totalWork)
@@ -500,8 +714,13 @@ namespace MonoDevelop.Ide.Gui.Components
 		}
 		
 		TextWriter IConsole.Error {
-			get { return logger; }
+			get { return errorLogger; }
 		} 
+
+		void IDebugConsole.Debug (int level, string category, string message)
+		{
+			outputPad.WriteDebug (level, category, message);
+		}
 		
 		bool IConsole.CloseOnDispose {
 			get { return false; }

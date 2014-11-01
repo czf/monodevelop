@@ -27,6 +27,12 @@
 using System;
 using System.Diagnostics;
 using System.Globalization;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using MonoDevelop.Core;
+using System.IO;
+using System.Linq;
 
 namespace MonoDevelop.Projects.Formats.MSBuild
 {
@@ -34,6 +40,7 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 	{
 		IBuildEngine engine;
 		Process proc;
+		bool alive = true;
 		
 		public int ReferenceCount { get; set; }
 		public DateTime ReleaseTime { get; set; }
@@ -44,31 +51,92 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 			this.engine = engine;
 		}
 
+		public event EventHandler Disconnected;
+
 		public IProjectBuilder LoadProject (string projectFile)
 		{
-			return engine.LoadProject (projectFile);
+			try {
+				return engine.LoadProject (projectFile);
+			} catch (Exception ex) {
+				CheckDisconnected ();
+				throw;
+			}
 		}
 		
 		public void UnloadProject (IProjectBuilder pb)
 		{
-			engine.UnloadProject (pb);
+			try {
+				engine.UnloadProject (pb);
+			} catch (Exception ex) {
+				LoggingService.LogError ("Project unloading failed", ex);
+				if (!CheckDisconnected ())
+					throw;
+			}
 		}
 
-		public void Initialize (string slnFile, CultureInfo uiCulture)
+		public void SetCulture (CultureInfo uiCulture)
 		{
-			engine.Initialize (slnFile, uiCulture);
+			try {
+				engine.SetCulture (uiCulture);
+			} catch (Exception ex) {
+				CheckDisconnected ();
+				throw;
+			}
 		}
-		
+
+		public void SetGlobalProperties (IDictionary<string, string> properties)
+		{
+			try {
+				engine.SetGlobalProperties (properties);
+			} catch (Exception ex) {
+				CheckDisconnected ();
+				throw;
+			}
+		}
+
+		void IBuildEngine.Ping ()
+		{
+			engine.Ping ();
+		}
+
+		bool CheckAlive ()
+		{
+			if (!alive)
+				return false;
+			try {
+				engine.Ping ();
+				return true;
+			} catch {
+				alive = false;
+				return false;
+			}
+		}
+
+		internal bool CheckDisconnected ()
+		{
+			if (!CheckAlive ()) {
+				if (Disconnected != null)
+					Disconnected (this, EventArgs.Empty);
+				return true;
+			}
+			return false;
+		}
+
 		public void Dispose ()
 		{
-			if (proc != null) {
-				try {
-					proc.Kill ();
-				} catch {
+			try {
+				alive = false;
+				if (proc != null) {
+					try {
+						proc.Kill ();
+					} catch {
+					}
 				}
+				else
+					engine.Dispose ();
+			} catch {
+				// Ignore
 			}
-			else
-				engine.Dispose ();
 		}
 	}
 	
@@ -76,35 +144,99 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 	{
 		RemoteBuildEngine engine;
 		IProjectBuilder builder;
-		
+		Dictionary<string,string[]> referenceCache;
+		string file;
+
 		internal RemoteProjectBuilder (string file, RemoteBuildEngine engine)
 		{
+			this.file = file;
 			this.engine = engine;
 			builder = engine.LoadProject (file);
+			referenceCache = new Dictionary<string, string[]> ();
 		}
-		
-		public MSBuildResult[] RunTarget (string target, ProjectConfigurationInfo[] configurations, ILogWriter logWriter,
-			MSBuildVerbosity verbosity)
-		{
-			if (target == null)
-				throw new ArgumentNullException ("target");
 
-			return builder.RunTarget (target, configurations, logWriter, verbosity);
-		}
-		
-		public string[] GetAssemblyReferences (ProjectConfigurationInfo[] configurations)
+		public event EventHandler Disconnected;
+
+		void CheckDisconnected ()
 		{
-			return builder.GetAssemblyReferences (configurations);
+			if (engine.CheckDisconnected ()) {
+				if (Disconnected != null)
+					Disconnected (this, EventArgs.Empty);
+			}
 		}
-		
+
+		public MSBuildResult Run (
+			ProjectConfigurationInfo[] configurations,
+			ILogWriter logWriter,
+			MSBuildVerbosity verbosity,
+			string[] runTargets,
+			string[] evaluateItems,
+			string[] evaluateProperties)
+		{
+			try {
+				return builder.Run (configurations, logWriter, verbosity, runTargets, evaluateItems, evaluateProperties);
+			} catch (Exception ex) {
+				CheckDisconnected ();
+				LoggingService.LogError ("RunTarget failed", ex);
+				MSBuildTargetResult err = new MSBuildTargetResult (file, false, "", "", file, 1, 1, 1, 1, "Unknown MSBuild failure. Please try building the project again", "");
+				MSBuildResult res = new MSBuildResult (new [] { err });
+				return res;
+			}
+		}
+
+		public string[] ResolveAssemblyReferences (ProjectConfigurationInfo[] configurations)
+		{
+			string[] refs = null;
+			var id = configurations [0].Configuration + "|" + configurations [0].Platform;
+
+			lock (referenceCache) {
+				if (!referenceCache.TryGetValue (id, out refs)) {
+					MSBuildResult result;
+					try {
+						result = builder.Run (
+						            configurations, null, MSBuildVerbosity.Normal,
+						            new[] { "ResolveAssemblyReferences" }, new [] { "ReferencePath" }, null
+					            );
+					} catch (Exception ex) {
+						CheckDisconnected ();
+						LoggingService.LogError ("ResolveAssemblyReferences failed", ex);
+						return new string[0];
+					}
+
+					List<MSBuildEvaluatedItem> items;
+					if (result.Items.TryGetValue ("ReferencePath", out items) && items != null) {
+						refs = items.Select (i => i.ItemSpec).ToArray ();
+					} else
+						refs = new string[0];
+
+					referenceCache [id] = refs;
+				}
+			}
+			return refs;
+		}
+
 		public void Refresh ()
 		{
-			builder.Refresh ();
+			lock (referenceCache)
+				referenceCache.Clear ();
+			try {
+				builder.Refresh ();
+			} catch (Exception ex) {
+				LoggingService.LogError ("MSBuild refresh failed", ex);
+				CheckDisconnected ();
+			}
 		}
 		
 		public void RefreshWithContent (string projectContent)
 		{
-			builder.RefreshWithContent (projectContent);
+			lock (referenceCache)
+				referenceCache.Clear ();
+			try {
+				builder.RefreshWithContent (projectContent);
+			} catch (Exception ex) {
+				LoggingService.LogError ("MSBuild refresh failed", ex);
+				CheckDisconnected ();
+			}
 		}
 
 		public void Dispose ()

@@ -41,8 +41,8 @@ namespace MonoDevelop.VersionControl.Subversion.Tests
 		[SetUp]
 		public override void Setup ()
 		{
-			RootUrl = new FilePath (FileService.CreateTempDirectory ());
-			RepoLocation = "svn://localhost:3690/repo";
+			RemotePath = new FilePath (FileService.CreateTempDirectory ());
+			RemoteUrl = "svn://localhost:3690/repo";
 			SvnServe = new Process ();
 			base.Setup ();
 		}
@@ -62,17 +62,10 @@ namespace MonoDevelop.VersionControl.Subversion.Tests
 @@ -0,0 +1 @@
 +text
 ";
-			Assert.AreEqual (difftext, Repo.GenerateDiff (RootCheckout + "testfile", Repo.GetVersionInfo (RootCheckout + "testfile", VersionInfoQueryFlags.IgnoreCache)).Content.Replace ("\n", "\r\n"));
+			Assert.AreEqual (difftext, Repo.GenerateDiff (LocalPath + "testfile", Repo.GetVersionInfo (LocalPath + "testfile", VersionInfoQueryFlags.IgnoreCache)).Content.Replace ("\n", "\r\n"));
 		}
 
 		// Tests that fail due to SvnSharp giving wrong data.
-		[Test]
-		[Ignore ("Fix SvnSharp")]
-		public override void MovesFile ()
-		{
-			base.MovesFile ();
-		}
-
 		[Test]
 		[Ignore ("Fix SvnSharp")]
 		public override void MovesDirectory ()
@@ -96,7 +89,7 @@ namespace MonoDevelop.VersionControl.Subversion.Tests
 
 		protected override void PostLock ()
 		{
-			string added = RootCheckout + "testfile";
+			string added = LocalPath + "testfile";
 			Assert.Throws<Exception> (delegate {
 				File.WriteAllText (added, "text");
 			});
@@ -111,13 +104,12 @@ namespace MonoDevelop.VersionControl.Subversion.Tests
 
 		protected override void PostUnlock ()
 		{
-			string added = RootCheckout + "testfile";
+			string added = LocalPath + "testfile";
 			Assert.DoesNotThrow (delegate {
 				File.WriteAllText (added, "text");
 			});
 		}
 
-		[Test]
 		protected override void TestValidUrl ()
 		{
 			base.TestValidUrl ();

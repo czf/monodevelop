@@ -3,6 +3,8 @@ using Gtk#.
 
 See http://www.monodevelop.com for more info.  
 
+[![Build Status](http://jenkins.mono-project.com/job/test-monodevelop-mainline/badge/icon)](http://jenkins.mono-project.com/job/test-monodevelop-mainline/)
+
 Directory organization
 ----------------------
 
@@ -20,6 +22,10 @@ If you are building from Git, make sure that you initialize the submodules
 that are part of this repository by executing:
 `git submodule update --init --recursive`
 
+If you are running a parallel mono installation, make sure to run all the following steps
+while having sourced your mono installation script. (source path/to/my-environment-script)
+See: http://www.mono-project.com/Parallel_Mono_Environments
+
 To compile execute:
 `./configure ; make`
 
@@ -35,8 +41,11 @@ There are two variables you can set when running `configure`:
   * `stable`: builds the MonoDevelop core and some stable extra add-ins.
   * `core`: builds the MonoDevelop core only.
   * `all`: builds everything
+  * `mac`: builds for Mac OS X
   * You can also create your own profile by adding a file to the profiles
 directory containing a list of the directories to build.
+
+Disclaimer: Please be aware that the 'extras/JavaBinding' and 'extras/ValaBinding' packages do not currently work. When prompted or by manually selecting them during the './configure --select' step, make sure they stay deselected. (deselected by default)
 
 Running
 -------
@@ -60,8 +69,8 @@ Packaging for OS X
 
 To package MonoDevelop for OS X in a convenient MonoDevelop.app
 file, just do this after MonoDevelop has finished building (with
-`make`):
-`cd main/build/MacOSX ; make MonoDevelop.app`
+`make`): `cd main/build/MacOSX ; make`.
+You can run MonoDevelop: `open MonoDevelop.app` or build dmg package: `./make-dmg-bundle.sh`
 
 Dependencies
 ------------
@@ -79,6 +88,18 @@ Special Environment Variables
 	If this environment variable exists we assume we are compiling inside wrench.
 	We use this to enable raygun only for 'release' builds and not for normal
 	developer builds compiled on a dev machine with 'make && make run'.
+	
+
+Known Problems
+-----------------------------
+
+"The type `GLib.IIcon' is defined in an assembly that is not referenced"
+This happens when you accidentally installed gtk-sharp3 instead of the 2.12.x branch version.
+Make sure to 'make uninstall' or otherwise remove the gtk-sharp3 version and install the older one.
+
+xbuild may still cache a reference to assemblies that you may have accidentally installed into your mono installation,
+like the gtk-sharp3 as described before. You can delete the cache in $HOME/.config/xbuild/pkgconfig-cache-2.xml
+
 
 
 References

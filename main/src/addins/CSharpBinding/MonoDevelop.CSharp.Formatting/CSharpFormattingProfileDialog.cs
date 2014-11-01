@@ -31,6 +31,9 @@ using System.Reflection;
 using System.Collections.Generic;
 using System.Linq;
 using ICSharpCode.NRefactory.CSharp;
+using MonoDevelop.Components;
+
+
 namespace MonoDevelop.CSharp.Formatting
 {
 	partial class CSharpFormattingProfileDialog : Dialog
@@ -482,7 +485,7 @@ namespace TestSpace {
 			
 			var column = new TreeViewColumn ();
 			// pixbuf column
-			var pixbufCellRenderer = new CellRendererPixbuf ();
+			var pixbufCellRenderer = new CellRendererImage ();
 			column.PackStart (pixbufCellRenderer, false);
 			column.SetCellDataFunc (pixbufCellRenderer, RenderIcon);
 			
@@ -539,7 +542,7 @@ namespace TestSpace {
 			AddOption (indentOptions, category, "IndentCaseBody", GettextCatalog.GetString ("Indent 'case' body"), spaceExample);
 			AddOption (indentOptions, category, "IndentBreakStatements", GettextCatalog.GetString ("Indent 'break' statements"), spaceExample);
 			AddOption (indentOptions, category, "IndentPreprocessorDirectives", GettextCatalog.GetString ("Indent pre processor directives"), 
-			           @"#define DEBUG
+				@"#define DEBUG
 class Test {
 	#if DEBUG
 	void Example ()
@@ -549,8 +552,19 @@ class Test {
 }
 ");
 
-			AddOption (indentOptions, category, "AlignEmbeddedIfStatements", GettextCatalog.GetString ("Align embedded 'if' statements"), "class AClass { void AMethod () { if (a) if (b) { int c; } } } ");
-			AddOption (indentOptions, category, "AlignEmbeddedUsingStatements", GettextCatalog.GetString ("Align embedded 'using' statements"), "class AClass { void AMethod () {using (IDisposable a = null) using (IDisposable b = null) { int c; } } }");
+			AddOption (indentOptions, category, "IndentBlocksInsideExpressions", GettextCatalog.GetString ("Indent blocks inside expressions"), 
+				@"
+class Test
+{
+	void Example ()
+	{
+		Test(delegate {
+			Call ();
+		});
+	}
+}
+");
+			AddOption (indentOptions, category, "AlignEmbeddedStatements", GettextCatalog.GetString ("Align embedded statements"), "class AClass { void AMethod () { if (a) if (b) { int c; } } } ");
 			treeviewIndentOptions.ExpandAll ();
 			#endregion
 			
@@ -1252,11 +1266,11 @@ delegate void BarFoo ();
 		
 		static void RenderIcon (TreeViewColumn col, CellRenderer cell, TreeModel model, TreeIter iter) 
 		{
-			var pixbufCellRenderer = (CellRendererPixbuf)cell;
+			var pixbufCellRenderer = (CellRendererImage)cell;
 			if (model.IterHasChild (iter)) {
-				pixbufCellRenderer.Pixbuf = ImageService.GetPixbuf (((TreeView)col.TreeView).GetRowExpanded (model.GetPath (iter)) ? MonoDevelop.Ide.Gui.Stock.OpenFolder : MonoDevelop.Ide.Gui.Stock.ClosedFolder, IconSize.Menu);
+				pixbufCellRenderer.Image = ImageService.GetIcon (((TreeView)col.TreeView).GetRowExpanded (model.GetPath (iter)) ? MonoDevelop.Ide.Gui.Stock.OpenFolder : MonoDevelop.Ide.Gui.Stock.ClosedFolder, IconSize.Menu);
 			} else {
-				pixbufCellRenderer.Pixbuf = ImageService.GetPixbuf (MonoDevelop.Ide.Gui.Stock.Property, IconSize.Menu);
+				pixbufCellRenderer.Image = ImageService.GetIcon (MonoDevelop.Ide.Gui.Stock.Property, IconSize.Menu);
 			}
 		}
 		

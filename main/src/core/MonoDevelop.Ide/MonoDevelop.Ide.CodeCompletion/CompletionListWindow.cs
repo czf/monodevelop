@@ -40,8 +40,8 @@ namespace MonoDevelop.Ide.CodeCompletion
 	public class CompletionListWindow : ListWindow, IListDataProvider
 	{
 		const int declarationWindowMargin = 3;
-		
-		TooltipInformationWindow declarationviewwindow = new TooltipInformationWindow ();
+
+		TooltipInformationWindow declarationviewwindow;
 		ICompletionData currentData;
 		Widget parsingMessage;
 		int initialWordLength;
@@ -65,6 +65,7 @@ namespace MonoDevelop.Ide.CodeCompletion
 			get { return completionDataList; }
 			set {
 				completionDataList = value;
+				defaultComparer = null;
 			}
 		}
 
@@ -174,6 +175,7 @@ namespace MonoDevelop.Ide.CodeCompletion
 					((IDisposable)completionDataList).Dispose ();
 				CloseCompletionList ();
 				completionDataList = null;
+				defaultComparer = null;
 			}
 
 			HideDeclarationView ();
@@ -254,7 +256,7 @@ namespace MonoDevelop.Ide.CodeCompletion
 						return false;
 					}
 					
-					if (declarationviewwindow.Multiple) {
+					if (declarationviewwindow != null && declarationviewwindow.Multiple) {
 						if (key == Gdk.Key.Left)
 							declarationviewwindow.OverloadLeft ();
 						else
@@ -361,6 +363,12 @@ namespace MonoDevelop.Ide.CodeCompletion
 				return CompletionData.Compare (a, b);
 			}
 		}
+
+		IComparer<ICompletionData> GetComparerForCompletionList (ICompletionDataList dataList)
+		{
+			var concrete = dataList as CompletionDataList;
+			return concrete != null && concrete.Comparer != null ? concrete.Comparer : new DataItemComparer ();
+		}
 		
 		bool FillList ()
 		{
@@ -372,8 +380,9 @@ namespace MonoDevelop.Ide.CodeCompletion
 			//sort, sinking obsolete items to the bottoms
 			//the string comparison is ordinal as that makes it an order of magnitude faster, which 
 			//which makes completion triggering noticeably more responsive
+			var list = completionDataList as CompletionDataList;
 			if (!completionDataList.IsSorted)
-				completionDataList.Sort (new DataItemComparer ());
+				completionDataList.Sort (GetComparerForCompletionList (completionDataList));
 
 			Reposition (true);
 			return true;
@@ -539,9 +548,21 @@ namespace MonoDevelop.Ide.CodeCompletion
 			}
 		}
 
+		void EnsureDeclarationViewWindow ()
+		{
+			if (declarationviewwindow == null) {
+				declarationviewwindow = new TooltipInformationWindow ();
+			} else {
+				declarationviewwindow.SetDefaultScheme ();
+			}
+		}
+
 		void RepositionDeclarationViewWindow ()
 		{
-			if (declarationviewwindow == null || base.GdkWindow == null)
+			if (base.GdkWindow == null)
+				return;
+			EnsureDeclarationViewWindow ();
+			if (declarationviewwindow.Overloads == 0)
 				return;
 			var selectedItem = List.SelectedItem;
 			Gdk.Rectangle rect = List.GetRowArea (selectedItem);
@@ -572,7 +593,7 @@ namespace MonoDevelop.Ide.CodeCompletion
 				filteredOverloads = new ICompletionData[] { data };
 			}
 
-			
+			EnsureDeclarationViewWindow ();
 			if (data != currentData) {
 				declarationviewwindow.Clear ();
 				var overloads = new List<ICompletionData> (filteredOverloads);
@@ -641,16 +662,19 @@ namespace MonoDevelop.Ide.CodeCompletion
 
 		bool IListDataProvider.HasMarkup (int n)
 		{
-			return completionDataList[n].DisplayFlags.HasFlag (DisplayFlags.Obsolete);
+			return (completionDataList [n].DisplayFlags & (DisplayFlags.Obsolete | DisplayFlags.MarkedBold)) != 0;
 		}
 		
 		//NOTE: we only ever return markup for items marked as obsolete
 		string IListDataProvider.GetMarkup (int n)
 		{
 			var completionData = completionDataList[n];
-			if (!completionData.HasOverloads && completionData.DisplayFlags.HasFlag (DisplayFlags.Obsolete) || 
-			    completionData.OverloadedData.All (data => data.DisplayFlags.HasFlag (DisplayFlags.Obsolete)))
+			if (!completionData.HasOverloads && (completionData.DisplayFlags & DisplayFlags.Obsolete) != 0 || 
+				completionData.HasOverloads && completionData.OverloadedData.All (data => (data.DisplayFlags & DisplayFlags.Obsolete) != 0))
 				return "<s>" + GLib.Markup.EscapeText (completionDataList[n].DisplayText) + "</s>";
+			
+			if ((completionData.DisplayFlags & DisplayFlags.MarkedBold) != 0)
+				return "<b>" + GLib.Markup.EscapeText (completionDataList[n].DisplayText) + "</b>";
 			return GLib.Markup.EscapeText (completionDataList[n].DisplayText);
 		}
 		
@@ -658,18 +682,22 @@ namespace MonoDevelop.Ide.CodeCompletion
 		{
 			return completionDataList[n].CompletionText;
 		}
-		static DataItemComparer defaultComparer = new DataItemComparer ();
+
+		IComparer<ICompletionData> defaultComparer;
+
 		int IListDataProvider.CompareTo (int n, int m)
 		{
-			return defaultComparer.Compare (completionDataList [n], completionDataList [m]);
+			var item1 = completionDataList [n];
+			var item2 = completionDataList [m];
+			return (defaultComparer ?? (defaultComparer = GetComparerForCompletionList (completionDataList))).Compare (item1, item2);
 		}
 		
-		Gdk.Pixbuf IListDataProvider.GetIcon (int n)
+		Xwt.Drawing.Image IListDataProvider.GetIcon (int n)
 		{
 			string iconName = ((CompletionData)completionDataList[n]).Icon;
 			if (string.IsNullOrEmpty (iconName))
 				return null;
-			return ImageService.GetPixbuf (iconName, IconSize.Menu);
+			return ImageService.GetIcon (iconName, IconSize.Menu);
 		}
 		
 		#endregion

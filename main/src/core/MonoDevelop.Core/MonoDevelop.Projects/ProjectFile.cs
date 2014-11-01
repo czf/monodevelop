@@ -406,8 +406,12 @@ namespace MonoDevelop.Projects
 				return resourceId;
 			}
 			set {
-				resourceId = value;
-				OnChanged ("ResourceId");
+				if (resourceId != value) {
+					var oldVal = ResourceId;
+					resourceId = value;
+					if (ResourceId != oldVal)
+						OnChanged ("ResourceId");
+				}
 			}
 		}
 
@@ -463,12 +467,6 @@ namespace MonoDevelop.Projects
 		{
 			if (project != null)
 				project.NotifyFilePropertyChangedInProject (this, property);
-		}
-
-		[Obsolete ("Use OnChanged(string property) instead.")]
-		protected virtual void OnChanged ()
-		{
-			OnChanged (null);
 		}
 	}
 

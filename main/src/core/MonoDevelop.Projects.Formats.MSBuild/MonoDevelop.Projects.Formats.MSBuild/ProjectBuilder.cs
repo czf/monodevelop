@@ -33,6 +33,9 @@ using System.Collections;
 using System.Reflection;
 
 //this is the builder for the deprecated build engine API
+using System.Linq;
+
+
 #pragma warning disable 618
 
 namespace MonoDevelop.Projects.Formats.MSBuild
@@ -72,36 +75,63 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 			if (currentLogWriter != null)
 				currentLogWriter.WriteLine (txt);
 		}
-		
-		public MSBuildResult[] RunTarget (string target, ProjectConfigurationInfo[] configurations, ILogWriter logWriter,
-			MSBuildVerbosity verbosity)
+
+		//HACK: Mono does not implement 3.5 CustomMetadataNames API
+		FieldInfo evaluatedMetadataField = typeof(BuildItem).GetField ("evaluatedMetadata", BindingFlags.NonPublic | BindingFlags.Instance);
+
+		public MSBuildResult Run (
+			ProjectConfigurationInfo[] configurations, ILogWriter logWriter, MSBuildVerbosity verbosity,
+			string[] runTargets, string[] evaluateItems, string[] evaluateProperties)
 		{
-			MSBuildResult[] result = null;
-			BuildEngine.RunSTA (delegate
-			{
+			MSBuildResult result = null;
+			BuildEngine.RunSTA (delegate {
 				try {
 					var project = SetupProject (configurations);
 					currentLogWriter = logWriter;
 
-					var logger = new LocalLogger (file);
 					buildEngine.Engine.UnregisterAllLoggers ();
+
+					var logger = new LocalLogger (file);
 					buildEngine.Engine.RegisterLogger (logger);
-					buildEngine.Engine.RegisterLogger (consoleLogger);
+					if (logWriter != null) {
+						buildEngine.Engine.RegisterLogger (consoleLogger);
+						consoleLogger.Verbosity = GetVerbosity (verbosity);
+					}
 
-					consoleLogger.Verbosity = GetVerbosity (verbosity);
+					if (runTargets != null && runTargets.Length > 0) {
+						// We are using this BuildProject overload and the BuildSettings.None argument as a workaround to
+						// an xbuild bug which causes references to not be resolved after the project has been built once.
+						buildEngine.Engine.BuildProject (project, runTargets, new Hashtable (), BuildSettings.None);
+					}
 
-					// We are using this BuildProject overload and the BuildSettings.None argument as a workaround to
-					// an xbuild bug which causes references to not be resolved after the project has been built once.
-					buildEngine.Engine.BuildProject (project, new [] { target }, new Hashtable (), BuildSettings.None);
-					
-					result = logger.BuildResult.ToArray ();
+					result = new MSBuildResult (logger.BuildResult.ToArray ());
+
+					if (evaluateProperties != null) {
+						foreach (var name in evaluateProperties)
+							result.Properties [name] = project.GetEvaluatedProperty (name);
+					}
+
+					if (evaluateItems != null) {
+						foreach (var name in evaluateItems) {
+							BuildItemGroup grp = project.GetEvaluatedItemsByName (name);
+							var list = new List<MSBuildEvaluatedItem> ();
+							foreach (BuildItem item in grp) {
+								var evItem = new MSBuildEvaluatedItem (name, UnescapeString (item.FinalItemSpec));
+								foreach (DictionaryEntry de in (IDictionary) evaluatedMetadataField.GetValue (item)) {
+									evItem.Metadata [(string)de.Key] = UnescapeString ((string)de.Value);
+								}
+								list.Add (evItem);
+							}
+							result.Items[name] = list;
+						}
+					}
 				} catch (InvalidProjectFileException ex) {
-					var r = new MSBuildResult (
+					var r = new MSBuildTargetResult (
 						file, false, ex.ErrorSubcategory, ex.ErrorCode, ex.ProjectFile,
 						ex.LineNumber, ex.ColumnNumber, ex.EndLineNumber, ex.EndColumnNumber,
 						ex.BaseMessage, ex.HelpKeyword);
 					logWriter.WriteLine (r.ToString ());
-					result = new [] { r };
+					result = new MSBuildResult (new [] { r });
 				} finally {
 					currentLogWriter = null;
 				}
@@ -124,26 +154,6 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 				return LoggerVerbosity.Diagnostic;
 			}
 		}
-
-		public string[] GetAssemblyReferences (ProjectConfigurationInfo[] configurations)
-		{
-			string[] refsArray = null;
-
-			BuildEngine.RunSTA (delegate
-			{
-				var project = SetupProject (configurations);
-				
-				// We are using this BuildProject overload and the BuildSettings.None argument as a workaround to
-				// an xbuild bug which causes references to not be resolved after the project has been built once.
-				buildEngine.Engine.BuildProject (project, new [] { "ResolveAssemblyReferences" }, new Hashtable (), BuildSettings.None);
-				BuildItemGroup grp = project.GetEvaluatedItemsByName ("ReferencePath");
-				var refs = new List<string> ();
-				foreach (BuildItem item in grp)
-					refs.Add (UnescapeString (item.Include));
-				refsArray = refs.ToArray ();
-			});
-			return refsArray;
-		}
 		
 		Project SetupProject (ProjectConfigurationInfo[] configurations)
 		{
@@ -151,12 +161,22 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 
 			foreach (var pc in configurations) {
 				var p = buildEngine.Engine.GetLoadedProject (pc.ProjectFile);
+
+				if (p != null && pc.ProjectFile == file) {
+					// building the project may create new items and/or modify some properties,
+					// so we always need to use a new instance of the project when building
+					buildEngine.Engine.UnloadProject (p);
+					p = null;
+				}
+
+				Environment.CurrentDirectory = Path.GetDirectoryName (file);
+
 				if (p == null) {
 					p = new Project (buildEngine.Engine);
 					var content = buildEngine.GetUnsavedProjectContent (pc.ProjectFile);
-					if (content == null)
+					if (content == null) {
 						p.Load (pc.ProjectFile);
-					else {
+					} else {
 						p.FullFileName = pc.ProjectFile;
 
 						if (HasXbuildFileBug ()) {
@@ -169,6 +189,7 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 						}
 					}
 				}
+
 				p.GlobalProperties.SetProperty ("Configuration", pc.Configuration);
 				if (!string.IsNullOrEmpty (pc.Platform))
 					p.GlobalProperties.SetProperty ("Platform", pc.Platform);

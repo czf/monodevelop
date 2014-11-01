@@ -62,13 +62,17 @@ namespace MonoDevelop.Components
 			}
 		}
 
-		public DropDownBoxListWindow (IListDataProvider provider) : base (WindowType.Popup)
+		public DropDownBoxListWindow (IListDataProvider provider) : this (provider, WindowType.Toplevel)
+		{
+		}
+
+		public DropDownBoxListWindow (IListDataProvider provider, WindowType windowType) : base (windowType)
 		{
 			this.DataProvider = provider;
 			this.TransientFor = IdeApp.Workbench.RootWindow;
 			this.TypeHint = Gdk.WindowTypeHint.Menu;
+			this.Decorated = false;
 			this.BorderWidth = 1;
-			this.Events |= Gdk.EventMask.KeyPressMask;
 			list = new ListWidget (this);
 			list.SelectItem += delegate {
 				var sel = list.Selection;
@@ -194,12 +198,6 @@ namespace MonoDevelop.Components
 			return base.OnEnterNotifyEvent (evnt);
 		}
 
-		protected override bool OnKeyPressEvent (Gdk.EventKey evnt)
-		{
-			ProcessKey (evnt.Key, evnt.State);
-			return base.OnKeyPressEvent (evnt);
-		}
-
 		internal class ListWidget: DrawingArea
 		{
 			const int margin = 0;
@@ -229,6 +227,7 @@ namespace MonoDevelop.Components
 			{
 				this.win = win;
 				this.Events = Gdk.EventMask.ButtonPressMask | Gdk.EventMask.ButtonReleaseMask | Gdk.EventMask.PointerMotionMask | Gdk.EventMask.LeaveNotifyMask;
+				this.CanFocus = true;
 				layout = new Pango.Layout (this.PangoContext);
 				CalcRowHeight ();
 				CalcVisibleRows ();
@@ -354,6 +353,11 @@ namespace MonoDevelop.Components
 				return base.OnMotionNotifyEvent (evnt);
 			}
 
+			protected override bool OnKeyPressEvent (Gdk.EventKey evnt)
+			{
+				return win.ProcessKey (evnt.Key, evnt.State);
+			}
+
 			protected override bool OnScrollEvent (Gdk.EventScroll evnt)
 			{
 				var s = GetRowByPosition ((int)evnt.Y);
@@ -382,13 +386,13 @@ namespace MonoDevelop.Components
 				while (ypos < winHeight - margin && n < win.DataProvider.IconCount) {
 					string text = win.DataProvider.GetMarkup (n) ?? "&lt;null&gt;";
 
-					Gdk.Pixbuf icon = win.DataProvider.GetIcon (n);
-					int iconHeight = icon != null ? icon.Height : 24;
-					int iconWidth = icon != null ? icon.Width : 0;
+					var icon = win.DataProvider.GetIcon (n);
+					int iconHeight = icon != null ? (int)icon.Height : 24;
+					int iconWidth = icon != null ? (int)icon.Width : 0;
 
 					layout.Ellipsize = Pango.EllipsizeMode.End;
 					layout.Width = (Allocation.Width - xpos - iconWidth - 2) * (int)Pango.Scale.PangoScale;
-					layout.SetMarkup (text);
+					layout.SetMarkup (PathBar.GetFirstLineFromMarkup (text));
 
 					int wi, he, typos, iypos;
 					layout.GetPixelSize (out wi, out he);
@@ -411,9 +415,10 @@ namespace MonoDevelop.Components
 						GdkWindow.DrawLayout (Style.TextGC (StateType.Normal), 
 						                      xpos + iconWidth + 2, typos, layout);
 					
-					if (icon != null)
-						GdkWindow.DrawPixbuf (Style.ForegroundGC (StateType.Normal), icon, 0, 0, 
-						                      xpos, iypos, iconWidth, iconHeight, Gdk.RgbDither.None, 0, 0);
+					if (icon != null) {
+						using (var ctx = Gdk.CairoHelper.Create (this.GdkWindow))
+							ctx.DrawImage (this, icon, xpos, iypos);
+					}
 					
 					ypos += rowHeight;
 					n++;
@@ -451,6 +456,7 @@ namespace MonoDevelop.Components
 				newHeight = win.DataProvider.IconCount > MaxVisibleRows ? 
 								(rowHeight * MaxVisibleRows) + margin * 2 :
 								(rowHeight * win.DataProvider.IconCount) + margin * 2;
+				newHeight += 2;
 				listWidth = Math.Min (450, CalcWidth ());
 				SetSizeRequest (listWidth, newHeight);
 			}
@@ -472,8 +478,8 @@ namespace MonoDevelop.Components
 				layout.SetMarkup (win.DataProvider.GetMarkup (longest) ?? "&lt;null&gt;");
 				int w, h;
 				layout.GetPixelSize (out w, out h);
-				Gdk.Pixbuf icon = win.DataProvider.GetIcon (longest);
-				int iconWidth = icon != null ? icon.Width : 24;
+				var icon = win.DataProvider.GetIcon (longest);
+				int iconWidth = icon != null ? (int) icon.Width : 24;
 				w += iconWidth + 2 + padding * 2 + margin;
 				return w;
 			}
@@ -556,7 +562,7 @@ namespace MonoDevelop.Components
 
 			string GetMarkup (int n);
 
-			Gdk.Pixbuf GetIcon (int n);
+			Xwt.Drawing.Image GetIcon (int n);
 
 			object GetTag (int n);
 

@@ -199,6 +199,9 @@ namespace MonoDevelop.Refactoring
 			return inspectors.Where (i => i.MimeType == mimeType);
 		}
 
+		static Stopwatch validActionsWatch = new Stopwatch ();
+		static Stopwatch actionWatch = new Stopwatch ();
+
 		public static Task<IEnumerable<CodeAction>> GetValidActions (Document doc, TextLocation loc, CancellationToken cancellationToken = default (CancellationToken))
 		{
 			var editor = doc.Editor;
@@ -207,14 +210,22 @@ namespace MonoDevelop.Refactoring
 				var result = new List<CodeAction> ();
 				var timer = InstrumentationService.CreateTimerCounter ("Source analysis background task", "Source analysis");
 				timer.BeginTiming ();
+				validActionsWatch.Restart ();
+				var timeTable = new Dictionary<CodeActionProvider, long> ();
 				try {
 					var parsedDocument = doc.ParsedDocument;
 					if (editor != null && parsedDocument != null && parsedDocument.CreateRefactoringContext != null) {
 						var ctx = parsedDocument.CreateRefactoringContext (doc, cancellationToken);
 						if (ctx != null) {
-							foreach (var provider in contextActions.Where (fix => disabledNodes.IndexOf (fix.IdString, StringComparison.Ordinal) < 0)) {
+							foreach (var provider in contextActions.Where (fix =>
+								fix.MimeType == editor.MimeType &&
+								disabledNodes.IndexOf (fix.IdString, StringComparison.Ordinal) < 0))
+							{
 								try {
+									actionWatch.Restart ();
 									result.AddRange (provider.GetActions (doc, ctx, loc, cancellationToken));
+									actionWatch.Stop ();
+									timeTable[provider] = actionWatch.ElapsedMilliseconds;
 								} catch (Exception ex) {
 									LoggingService.LogError ("Error in context action provider " + provider.Title, ex);
 								}
@@ -225,6 +236,14 @@ namespace MonoDevelop.Refactoring
 					LoggingService.LogError ("Error in analysis service", ex);
 				} finally {
 					timer.EndTiming ();
+					validActionsWatch.Stop ();
+					if (validActionsWatch.ElapsedMilliseconds > 1000) {
+						LoggingService.LogWarning ("Warning slow edit action update."); 
+						foreach (var pair in timeTable) {
+							if (pair.Value > 50)
+								LoggingService.LogInfo ("ACTION '" + pair.Key.Title + "' took " + pair.Value +"ms"); 
+						}
+					}
 				}
 				return (IEnumerable<CodeAction>)result;
 			}, cancellationToken);

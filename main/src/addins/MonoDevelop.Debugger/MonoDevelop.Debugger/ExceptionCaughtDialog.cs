@@ -1,22 +1,22 @@
-// 
+//
 // ExceptionCaughtDialog.cs
-//  
+//
 // Authors: Lluis Sanchez Gual <lluis@novell.com>
 //          Jeffrey Stedfast <jeff@xamarin.com>
-// 
+//
 // Copyright (c) 2010 Novell, Inc. (http://www.novell.com)
 // Copyright (c) 2011 Xamarin Inc. (http://www.xamarin.com)
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
 // to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be included in
 // all copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -26,6 +26,8 @@
 // THE SOFTWARE.
 
 using System;
+using System.IO;
+using System.Linq;
 
 using Gtk;
 
@@ -37,12 +39,13 @@ using MonoDevelop.Components;
 using MonoDevelop.Ide.TextEditing;
 using MonoDevelop.Ide.Gui.Content;
 using Mono.TextEditor;
+using MonoDevelop.Ide.Fonts;
 
 namespace MonoDevelop.Debugger
 {
 	class ExceptionCaughtDialog : Dialog
 	{
-		static readonly Gdk.Pixbuf WarningIconPixbuf = Gdk.Pixbuf.LoadFromResource ("exception-icon.png");
+		static readonly Xwt.Drawing.Image WarningIconPixbuf = Xwt.Drawing.Image.FromResource ("exception-light-48.png");
 		protected ObjectValueTreeView ExceptionValueTreeView { get; private set; }
 		protected TreeView StackTraceTreeView { get; private set; }
 		protected CheckButton OnlyShowMyCodeCheckbox { get; private set; }
@@ -72,8 +75,8 @@ namespace MonoDevelop.Debugger
 
 		Widget CreateExceptionInfoHeader ()
 		{
-			ExceptionMessageLabel = new Label () { UseMarkup = true, Selectable = true, Wrap = true, WidthRequest = 500, Xalign = 0.0f, Yalign = 0.0f };
-			ExceptionTypeLabel = new Label () { UseMarkup = true, Xalign = 0.0f };
+			ExceptionMessageLabel = new Label { UseMarkup = true, Selectable = true, Wrap = true, WidthRequest = 500, Xalign = 0.0f, Yalign = 0.0f };
+			ExceptionTypeLabel = new Label { UseMarkup = true, Xalign = 0.0f };
 
 			ExceptionMessageLabel.Show ();
 			ExceptionTypeLabel.Show ();
@@ -96,7 +99,7 @@ namespace MonoDevelop.Debugger
 
 		Widget CreateExceptionHeader ()
 		{
-			var icon = new Image (WarningIconPixbuf);
+			var icon = new ImageView (WarningIconPixbuf);
 			icon.Show ();
 
 			var hbox = new HBox (false, 12) { BorderWidth = 12 };
@@ -122,7 +125,7 @@ namespace MonoDevelop.Debugger
 			ExceptionValueTreeView.Selection.Changed += ExceptionValueSelectionChanged;
 			ExceptionValueTreeView.Show ();
 
-			var scrolled = new ScrolledWindow () { HeightRequest = 180 };
+			var scrolled = new ScrolledWindow { HeightRequest = 180, HscrollbarPolicy = PolicyType.Automatic, VscrollbarPolicy = PolicyType.Automatic };
 
 			scrolled.ShadowType = ShadowType.None;
 			scrolled.Add (ExceptionValueTreeView);
@@ -136,17 +139,21 @@ namespace MonoDevelop.Debugger
 			var frame = (ExceptionStackFrame) model.GetValue (iter, (int) ModelColumn.StackFrame);
 			var renderer = (StackFrameCellRenderer) cr;
 
-			if (!(renderer.IsStackFrame = frame != null))
+			renderer.Markup = (string) model.GetValue (iter, (int) ModelColumn.Markup);
+
+			if (!(renderer.IsStackFrame = frame != null)) {
+				renderer.IsUserCode = false;
+				renderer.LineNumber = -1;
 				return;
+			}
 
 			renderer.IsUserCode = (bool) model.GetValue (iter, (int) ModelColumn.IsUserCode);
 			renderer.LineNumber = !string.IsNullOrEmpty (frame.File) ? frame.Line : -1;
-			renderer.Markup = (string) model.GetValue (iter, (int) ModelColumn.Markup);
 		}
 
 		Widget CreateStackTraceTreeView ()
 		{
-			var store = new ListStore (typeof (ExceptionStackFrame), typeof (string), typeof (bool), typeof (int), typeof (int));
+			var store = new ListStore (typeof (ExceptionStackFrame), typeof (string), typeof (bool));
 			StackTraceTreeView = new TreeView (store);
 			StackTraceTreeView.FixedHeightMode = false;
 			StackTraceTreeView.HeadersVisible = false;
@@ -162,7 +169,7 @@ namespace MonoDevelop.Debugger
 			StackTraceTreeView.SizeAllocated += (o, args) => renderer.Width = args.Allocation.Width;
 			StackTraceTreeView.RowActivated += StackFrameActivated;
 
-			var scrolled = new ScrolledWindow () { HeightRequest = 180 };
+			var scrolled = new ScrolledWindow { HeightRequest = 180, HscrollbarPolicy = PolicyType.Automatic, VscrollbarPolicy = PolicyType.Automatic };
 			scrolled.ShadowType = ShadowType.None;
 			scrolled.Add (StackTraceTreeView);
 			scrolled.Show ();
@@ -172,7 +179,7 @@ namespace MonoDevelop.Debugger
 
 		Widget CreateButtonBox ()
 		{
-			var buttons = new HButtonBox () { Layout = ButtonBoxStyle.End, Spacing = 12 };
+			var buttons = new HButtonBox { Layout = ButtonBoxStyle.End, Spacing = 12 };
 
 			var copy = new Button (Stock.Copy);
 			copy.Clicked += CopyClicked;
@@ -192,7 +199,7 @@ namespace MonoDevelop.Debugger
 			return buttons;
 		}
 
-		Widget CreateSeparator ()
+		static Widget CreateSeparator ()
 		{
 			var separator = new HSeparator ();
 			separator.Show ();
@@ -274,7 +281,7 @@ namespace MonoDevelop.Debugger
 			var selectedRows = ExceptionValueTreeView.Selection.GetSelectedRows ();
 			ExceptionInfo ex;
 
-			if (TryGetExceptionInfo (selectedRows[0], out ex)) {
+			if (selectedRows.Length > 0 && TryGetExceptionInfo (selectedRows[0], out ex)) {
 				ShowStackTrace (ex);
 				selected = ex;
 			} else if (selected != exception) {
@@ -293,8 +300,12 @@ namespace MonoDevelop.Debugger
 
 			var frame = (ExceptionStackFrame) model.GetValue (iter, (int) ModelColumn.StackFrame);
 
-			if (frame != null && !string.IsNullOrEmpty (frame.File))
-				IdeApp.Workbench.OpenDocument (frame.File, frame.Line, frame.Column);
+			if (frame != null && !string.IsNullOrEmpty (frame.File) && File.Exists (frame.File)) {
+				try {
+					IdeApp.Workbench.OpenDocument (frame.File, null, frame.Line, frame.Column, MonoDevelop.Ide.Gui.OpenDocumentOptions.Debugger);
+				} catch (FileNotFoundException) {
+				}
+			}
 		}
 
 		static bool IsUserCode (ExceptionStackFrame frame)
@@ -302,7 +313,7 @@ namespace MonoDevelop.Debugger
 			if (frame == null || string.IsNullOrEmpty (frame.File))
 				return false;
 
-			return IdeApp.Workspace.GetProjectContainingFile (frame.File) != null;
+			return IdeApp.Workspace.GetProjectsContainingFile (frame.File).Any ();
 		}
 
 		void ShowStackTrace (ExceptionInfo ex)
@@ -409,7 +420,7 @@ namespace MonoDevelop.Debugger
 
 	class StackFrameCellRenderer : CellRenderer
 	{
-		static readonly Pango.FontDescription LineNumberFont = Pango.FontDescription.FromString ("Menlo 9");
+		static readonly Pango.FontDescription LineNumberFont = FontService.MonospaceFont.CopyModified (0.9d);
 		const int RoundedRectangleRadius = 2;
 		const int RoundedRectangleHeight = 14;
 		const int RoundedRectangleWidth = 28;
@@ -551,7 +562,7 @@ namespace MonoDevelop.Debugger
 		}
 
 		public int Line {
-			get; private set;
+			get; set;
 		}
 
 		public bool IsMinimized {
@@ -627,11 +638,11 @@ namespace MonoDevelop.Debugger
 
 	class ExceptionCaughtButton: TopLevelWidgetExtension
 	{
-		readonly Gdk.Pixbuf closeSelOverImage;
-		readonly Gdk.Pixbuf closeSelImage;
+		readonly Xwt.Drawing.Image closeSelOverImage;
+		readonly Xwt.Drawing.Image closeSelImage;
 		readonly ExceptionCaughtMessage dlg;
 		readonly ExceptionInfo exception;
-		Gtk.Label messageLabel;
+		Label messageLabel;
 
 		public ExceptionCaughtButton (ExceptionInfo val, ExceptionCaughtMessage dlg, FilePath file, int line)
 		{
@@ -640,37 +651,44 @@ namespace MonoDevelop.Debugger
 			OffsetX = 6;
 			File = file;
 			Line = line;
-			closeSelImage = Gdk.Pixbuf.LoadFromResource ("MonoDevelop.Close.Selected.png");
-			closeSelOverImage = Gdk.Pixbuf.LoadFromResource ("MonoDevelop.Close.Selected.Over.png");
+			closeSelImage = ImageService.GetIcon ("md-popup-close", IconSize.Menu);
+			closeSelOverImage = ImageService.GetIcon ("md-popup-close-hover", IconSize.Menu);
+		}
+
+		protected override void OnLineChanged ()
+		{
+			base.OnLineChanged ();
+			dlg.Line = Line;
 		}
 
 		protected override void OnLineDeleted ()
 		{
-			dlg.Dispose ();
+			base.OnLineDeleted ();
+			Line++;
 		}
 
 		public override Widget CreateWidget ()
 		{
-			var icon = Gdk.Pixbuf.LoadFromResource ("lightning.png");
-			var image = new Gtk.Image (icon);
+			var icon = Xwt.Drawing.Image.FromResource ("lightning-light-16.png");
+			var image = new Xwt.ImageView (icon).ToGtkWidget ();
 
-			HBox box = new HBox (false, 6);
-			VBox vb = new VBox ();
+			var box = new HBox (false, 6);
+			var vb = new VBox ();
 			vb.PackStart (image, false, false, 0);
 			box.PackStart (vb, false, false, 0);
 			vb = new VBox (false, 6);
-			vb.PackStart (new Gtk.Label () {
+			vb.PackStart (new Label {
 				Markup = GettextCatalog.GetString ("<b>{0}</b> has been thrown", exception.Type),
 				Xalign = 0
 			});
-			messageLabel = new Gtk.Label () {
+			messageLabel = new Label {
 				Xalign = 0,
 				NoShowAll = true
 			};
 			vb.PackStart (messageLabel);
 
 			var detailsBtn = new Xwt.LinkLabel (GettextCatalog.GetString ("Show Details"));
-			HBox hh = new HBox ();
+			var hh = new HBox ();
 			detailsBtn.NavigateToUrl += (o,e) => dlg.ShowDialog ();
 			hh.PackStart (detailsBtn.ToGtkWidget (), false, false, 0);
 			vb.PackStart (hh, false, false, 0);
@@ -678,7 +696,7 @@ namespace MonoDevelop.Debugger
 			box.PackStart (vb, true, true, 0);
 
 			vb = new VBox ();
-			var closeButton = new ImageButton () {
+			var closeButton = new ImageButton {
 				InactiveImage = closeSelImage,
 				Image = closeSelOverImage
 			};
@@ -695,7 +713,7 @@ namespace MonoDevelop.Debugger
 			};
 			LoadData ();
 
-			PopoverWidget eb = new PopoverWidget ();
+			var eb = new PopoverWidget ();
 			eb.ShowArrow = true;
 			eb.EnableAnimation = true;
 			eb.PopupPosition = PopupPosition.Left;
@@ -731,19 +749,26 @@ namespace MonoDevelop.Debugger
 			Line = line;
 		}
 
+		protected override void OnLineChanged ()
+		{
+			base.OnLineChanged ();
+			dlg.Line = Line;
+		}
+
 		protected override void OnLineDeleted ()
 		{
-			dlg.Dispose ();
+			base.OnLineDeleted ();
+			Line++;
 		}
 
 		public override Widget CreateWidget ()
 		{
-			Gtk.EventBox box = new EventBox ();
+			var box = new EventBox ();
 			box.VisibleWindow = false;
-			var icon = Gdk.Pixbuf.LoadFromResource ("lightning.png");
-			box.Add (new Gtk.Image (icon));
+			var icon = Xwt.Drawing.Image.FromResource ("lightning-light-16.png");
+			box.Add (new Xwt.ImageView (icon).ToGtkWidget ());
 			box.ButtonPressEvent += (o,e) => dlg.ShowButton ();
-			PopoverWidget eb = new PopoverWidget ();
+			var eb = new PopoverWidget ();
 			eb.Theme.Padding = 2;
 			eb.ShowArrow = true;
 			eb.EnableAnimation = true;
@@ -758,8 +783,8 @@ namespace MonoDevelop.Debugger
 	{
 		public override bool KeyPress (Gdk.Key key, char keyChar, Gdk.ModifierType modifier)
 		{
-			if (key == Gdk.Key.Escape && DebuggingService.ExceptionCaughtMessage != null && 
-			    !DebuggingService.ExceptionCaughtMessage.IsMinimized && 
+			if (key == Gdk.Key.Escape && DebuggingService.ExceptionCaughtMessage != null &&
+			    !DebuggingService.ExceptionCaughtMessage.IsMinimized &&
 			    DebuggingService.ExceptionCaughtMessage.File.CanonicalPath == Document.FileName.CanonicalPath) {
 
 				DebuggingService.ExceptionCaughtMessage.ShowMiniButton ();

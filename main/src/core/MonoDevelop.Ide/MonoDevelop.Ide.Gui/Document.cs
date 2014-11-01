@@ -208,8 +208,11 @@ namespace MonoDevelop.Ide.Gui
 
 				if (solution != null && IdeApp.Workspace != null) {
 					var config = IdeApp.Workspace.ActiveConfiguration;
-					if (config != null && !solution.GetConfiguration (config).BuildEnabledForItem (project))
-						return false;
+					if (config != null) {
+						var sc = solution.GetConfiguration (config);
+						if (sc != null && !sc.BuildEnabledForItem (project))
+							return false;
+					}
 				}
 
 				var pf = project.GetProjectFile (FileName);
@@ -376,7 +379,13 @@ namespace MonoDevelop.Ide.Gui
 				// Note that the parsed document may be overwritten by a background thread to a more recent one.
 				var doc = parsedDocument;
 				if (doc != null && doc.ParsedFile != null) {
-					doc.ParsedFile.LastWriteTime = DateTime.Now;
+					string fileName = Window.ViewContent.ContentName;
+					try {
+						doc.ParsedFile.LastWriteTime = File.GetLastWriteTimeUtc (fileName);
+					} catch (Exception e) {
+						doc.ParsedFile.LastWriteTime = DateTime.UtcNow;
+						LoggingService.LogWarning ("Exception while getting the write time from " + fileName, e); 
+					}
 				}
 				TypeSystemService.TrackFileChanges = true;
 			}
@@ -408,7 +417,6 @@ namespace MonoDevelop.Ide.Gui
 					Encoding = encoding,
 					ShowEncodingSelector = (tbuffer != null),
 				};
-				
 				if (Window.ViewContent.IsUntitled)
 					dlg.InitialFileName = Window.ViewContent.UntitledName;
 				else {
@@ -634,18 +642,27 @@ namespace MonoDevelop.Ide.Gui
 			foreach (TextEditorExtensionNode extNode in extensions) {
 				if (!extNode.Supports (FileName, mimetypeChain))
 					continue;
-				TextEditorExtension ext = (TextEditorExtension)extNode.CreateInstance ();
+				TextEditorExtension ext;
+				try {
+					ext = (TextEditorExtension)extNode.CreateInstance ();
+				} catch (Exception e) {
+					LoggingService.LogError ("Error while creating text editor extension :" + extNode.Id + "(" + extNode.Type +")", e); 
+					continue;
+				}
 				if (ext.ExtendsEditor (this, editor)) {
-					if (editorExtension == null)
-						editorExtension = ext;
-					if (last != null)
+					if (last != null) {
+						ext.Next = last.Next;
 						last.Next = ext;
-					last = ext;
+						last = ext;
+					} else {
+						editorExtension = last = ext;
+						last.Next = editor.AttachExtension (editorExtension);
+					}
 					ext.Initialize (this);
 				}
 			}
-			if (editorExtension != null)
-				last.Next = editor.AttachExtension (editorExtension);
+			if (window is SdiWorkspaceWindow)
+				((SdiWorkspaceWindow)window).AttachToPathedDocument (GetContent<MonoDevelop.Ide.Gui.Content.IPathedDocument> ());
 		}
 
 		void DetachExtensionChain ()
@@ -697,9 +714,6 @@ namespace MonoDevelop.Ide.Gui
 			}
 			
 			window.Document = this;
-			
-			if (window is SdiWorkspaceWindow)
-				((SdiWorkspaceWindow)window).AttachToPathedDocument (GetContent<MonoDevelop.Ide.Gui.Content.IPathedDocument> ());
 		}
 		
 		/// <summary>
@@ -718,10 +732,15 @@ namespace MonoDevelop.Ide.Gui
 			e.Document.RunWhenLoaded (action);
 		}
 
+		public void AttachToProject (Project project)
+		{
+			SetProject (project);
+		}
+
 		TypeSystemService.ProjectContentWrapper currentWrapper;
 		internal void SetProject (Project project)
 		{
-			if (Window.ViewContent.Project == project)
+			if (Window == null || Window.ViewContent == null || Window.ViewContent.Project == project)
 				return;
 			DetachExtensionChain ();
 			ISupportsProjectReload pr = GetContent<ISupportsProjectReload> ();
@@ -749,9 +768,7 @@ namespace MonoDevelop.Ide.Gui
 				var wrapper = TypeSystemService.GetProjectContentWrapper (project);
 				wrapper.Loaded += HandleInLoadChanged;
 				currentWrapper = wrapper;
-				RunWhenLoaded (delegate {
-					currentWrapper.RequestLoad ();
-				});
+				currentWrapper.RequestLoad ();
 			}
 			StartReparseThread ();
 		}
@@ -806,7 +823,7 @@ namespace MonoDevelop.Ide.Gui
 			get {
 				if (currentWrapper == null)
 					return false;
-				return !currentWrapper.IsLoaded || !currentWrapper.ReferencesConnected;
+				return !currentWrapper.IsLoaded;
 			}
 		}
 
@@ -826,42 +843,49 @@ namespace MonoDevelop.Ide.Gui
 		}
 		
 		uint parseTimeout = 0;
+		object reparseLock = new object();
 		internal void StartReparseThread ()
 		{
-			// Don't directly parse the document because doing it at every key press is
-			// very inefficient. Do it after a small delay instead, so several changes can
-			// be parsed at the same time.
-			string currentParseFile = FileName;
-			if (string.IsNullOrEmpty (currentParseFile))
-				return;
-			CancelParseTimeout ();
-			if (IsProjectContextInUpdate)
-				return;
-			parseTimeout = GLib.Timeout.Add (ParseDelay, delegate {
-				var editor = Editor;
-				if (editor == null || IsProjectContextInUpdate) {
+			lock (reparseLock) {
+				if (currentWrapper != null)
+					currentWrapper.EnsureReferencesAreLoaded ();
+
+				// Don't directly parse the document because doing it at every key press is
+				// very inefficient. Do it after a small delay instead, so several changes can
+				// be parsed at the same time.
+				string currentParseFile = FileName;
+				if (string.IsNullOrEmpty (currentParseFile))
+					return;
+				CancelParseTimeout ();
+				if (IsProjectContextInUpdate) {
+					return;
+				}
+				parseTimeout = GLib.Timeout.Add (ParseDelay, delegate {
+					var editor = Editor;
+					if (editor == null || IsProjectContextInUpdate) {
+						parseTimeout = 0;
+						return false;
+					}
+					string currentParseText = editor.Text;
+					string mimeType = editor.Document.MimeType;
+					ThreadPool.QueueUserWorkItem (delegate {
+						if (IsProjectContextInUpdate) {
+							return;
+						}
+						TypeSystemService.AddSkippedFile (currentParseFile);
+						var currentParsedDocument = TypeSystemService.ParseFile (Project, currentParseFile, mimeType, currentParseText);
+						Application.Invoke (delegate {
+							// this may be called after the document has closed, in that case the OnDocumentParsed event shouldn't be invoked.
+							if (isClosed)
+								return;
+							this.parsedDocument = currentParsedDocument;
+							OnDocumentParsed (EventArgs.Empty);
+						});
+					});
 					parseTimeout = 0;
 					return false;
-				}
-				string currentParseText = editor.Text;
-				string mimeType = editor.Document.MimeType;
-				ThreadPool.QueueUserWorkItem (delegate {
-					if (IsProjectContextInUpdate)
-						return;
-					TypeSystemService.AddSkippedFile (currentParseFile);
-					var currentParsedDocument = TypeSystemService.ParseFile (Project, currentParseFile, mimeType, currentParseText);
-					Application.Invoke (delegate {
-						// this may be called after the document has closed, in that case the OnDocumentParsed event shouldn't be invoked.
-						if (isClosed)
-							return;
-
-						this.parsedDocument = currentParsedDocument;
-						OnDocumentParsed (EventArgs.Empty);
-					});
 				});
-				parseTimeout = 0;
-				return false;
-			});
+			}
 		}
 		
 		/// <summary>
@@ -888,7 +912,7 @@ namespace MonoDevelop.Ide.Gui
 				window.ViewContent.Project = null;
 		}
 		
-		void OnDocumentParsed (EventArgs e)
+		protected virtual void OnDocumentParsed (EventArgs e)
 		{
 			EventHandler handler = this.DocumentParsed;
 			if (handler != null)

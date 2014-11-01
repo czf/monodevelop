@@ -445,9 +445,18 @@ namespace MonoDevelop.Ide.CodeCompletion
 
 			// special case end with punctuation like 'param:' -> don't input double punctuation, otherwise we would end up with 'param::'
 			if (char.IsPunctuation (keyChar) && keyChar != '_') {
-				foreach (var item in FilteredItems) {
-					if (DataProvider.GetText (item).EndsWith (keyChar.ToString (), StringComparison.Ordinal)) {
-						list.SelectedItem = item;
+				if (keyChar == ':') {
+					foreach (var item in FilteredItems) {
+						if (DataProvider.GetText (item).EndsWith (keyChar.ToString (), StringComparison.Ordinal)) {
+							list.SelectedItem = item;
+							return KeyActions.Complete | KeyActions.CloseWindow | KeyActions.Ignore;
+						}
+					}
+				} else {
+					var selectedItem = list.SelectedItem;
+					if (selectedItem < 0 || selectedItem >= DataProvider.ItemCount)
+						return KeyActions.CloseWindow;
+					if (DataProvider.GetText (selectedItem).EndsWith (keyChar.ToString (), StringComparison.Ordinal)) {
 						return KeyActions.Complete | KeyActions.CloseWindow | KeyActions.Ignore;
 					}
 				}
@@ -691,7 +700,7 @@ namespace MonoDevelop.Ide.CodeCompletion
 		string GetCompletionText (int n);
 		string GetDescription (int n, bool isSelected);
 		string GetRightSideDescription (int n, bool isSelected);
-		Gdk.Pixbuf GetIcon (int n);
+		Xwt.Drawing.Image GetIcon (int n);
 		int CompareTo (int n, int m);
 	}
 }

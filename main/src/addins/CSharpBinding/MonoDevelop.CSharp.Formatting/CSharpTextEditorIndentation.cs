@@ -170,6 +170,7 @@ namespace MonoDevelop.CSharp.Formatting
 				IdeApp.Workspace.ActiveConfigurationChanged += HandleTextOptionsChanged;
 		}
 
+		bool indentationDisabled;
 
 		void HandleTextOptionsChanged (object sender, EventArgs e)
 		{
@@ -189,10 +190,14 @@ namespace MonoDevelop.CSharp.Formatting
 				indentEngine = new NullIStateMachineIndentEngine (textEditorData.Document);
 			}
 			stateTracker = new CacheIndentEngine (indentEngine);
-			textEditorData.IndentationTracker = new IndentVirtualSpaceManager (textEditorData, stateTracker);
+			if (DefaultSourceEditorOptions.Instance.IndentStyle == IndentStyle.Auto) {
+				textEditorData.IndentationTracker = new DefaultIndentationTracker (textEditorData.Document);
+			} else {
+				textEditorData.IndentationTracker = new IndentVirtualSpaceManager (textEditorData, stateTracker);
+			}
 
-
-			if (textEditorData.Options.IndentStyle == IndentStyle.Auto || textEditorData.Options.IndentStyle == IndentStyle.None) {
+			indentationDisabled = DefaultSourceEditorOptions.Instance.IndentStyle == IndentStyle.Auto || DefaultSourceEditorOptions.Instance.IndentStyle == IndentStyle.None;
+			if (indentationDisabled) {
 				textEditorData.TextPasteHandler = null;
 			} else {
 				textEditorData.TextPasteHandler = new TextPasteIndentEngine (stateTracker, options, policy);
@@ -404,7 +409,7 @@ namespace MonoDevelop.CSharp.Formatting
 			if (keyChar == ';' && !(textEditorData.CurrentMode is TextLinkEditMode) && !DoInsertTemplate () && !isSomethingSelected && PropertyService.Get (
 				    "SmartSemicolonPlacement",
 				    false
-			    )) {
+			    ) && !(stateTracker.IsInsideComment || stateTracker.IsInsideString)) {
 				bool retval = base.KeyPress (key, keyChar, modifier);
 				DocumentLine curLine = textEditorData.Document.GetLine (textEditorData.Caret.Line);
 				string text = textEditorData.Document.GetTextAt (curLine);
@@ -460,7 +465,7 @@ namespace MonoDevelop.CSharp.Formatting
 
 
 			//do the smart indent
-			if (textEditorData.Options.IndentStyle == IndentStyle.Smart || textEditorData.Options.IndentStyle == IndentStyle.Virtual) {
+			if (!indentationDisabled) {
 				bool retval;
 				//capture some of the current state
 				int oldBufLen = textEditorData.Length;
@@ -501,7 +506,8 @@ namespace MonoDevelop.CSharp.Formatting
 					//inserted rather than just updating the stack due to moving around
 
 					SafeUpdateIndentEngine (textEditorData.Caret.Offset);
-					automaticReindent = (stateTracker.NeedsReindent && lastCharInserted != '\0');
+					// Automatically reindent in text link mode will cause the mode exiting, therefore we need to prevent that.
+					automaticReindent = (stateTracker.NeedsReindent && lastCharInserted != '\0') && !(textEditorData.CurrentMode is TextLinkEditMode);
 					if (key == Gdk.Key.Return && (reIndent || automaticReindent)) {
 						if (textEditorData.Options.IndentStyle == IndentStyle.Virtual) {
 							if (textEditorData.GetLine (textEditorData.Caret.Line).Length == 0)
@@ -511,13 +517,14 @@ namespace MonoDevelop.CSharp.Formatting
 						}
 					}
 				}
-
-				if (reIndent || key != Gdk.Key.Return && key != Gdk.Key.Tab && automaticReindent) {
+				const string reindentChars = ";){}";
+				if (reIndent || key != Gdk.Key.Return && key != Gdk.Key.Tab && automaticReindent && reindentChars.Contains (keyChar)) {
 					using (var undo = textEditorData.OpenUndoGroup ()) {
 						DoReSmartIndent ();
 					}
 				}
-				if (!skipFormatting) {
+
+				if (!skipFormatting && !(stateTracker.IsInsideComment || stateTracker.IsInsideString)) {
 					if (keyChar == ';' || keyChar == '}') {
 						using (var undo = textEditorData.OpenUndoGroup ()) {
 							if (OnTheFlyFormatting && textEditorData != null && !(textEditorData.CurrentMode is TextLinkEditMode) && !(textEditorData.CurrentMode is InsertionCursorEditMode)) {
@@ -544,7 +551,7 @@ namespace MonoDevelop.CSharp.Formatting
 			//and calls HandleCodeCompletion etc to handles completion
 			var result = base.KeyPress (key, keyChar, modifier);
 
-			if (key == Gdk.Key.Return || key == Gdk.Key.KP_Enter) {
+			if (!indentationDisabled && (key == Gdk.Key.Return || key == Gdk.Key.KP_Enter)) {
 				DoReSmartIndent ();
 			}
 
@@ -573,6 +580,7 @@ namespace MonoDevelop.CSharp.Formatting
 			int lastNonWsOffset = caretOffset;
 			char lastNonWsChar = '\0';
 			outOffset = caretOffset;
+
 			int max = curLine.EndOffset;
 
 			int end = caretOffset;
@@ -588,69 +596,22 @@ namespace MonoDevelop.CSharp.Formatting
 					return false;
 			}
 
-			bool isInString = false, isInChar = false, isVerbatimString = false;
-			bool isInLineComment = false, isInBlockComment = false;
-			bool firstChar = true;
-			for (int pos = caretOffset; pos < max; pos++) {
-				if (pos == caretOffset) {
-					if (isInString || isInChar || isVerbatimString || isInLineComment || isInBlockComment) {
-						outOffset = pos;
-						return true;
-					}
-				}
-				char ch = data.Document.GetCharAt (pos);
-				switch (ch) {
-				case '}':
-					if (firstChar && !IsSemicolonalreadyPlaced (data, caretOffset))
-						return false;
-					break;
-				case '/':
-					if (isInBlockComment) {
-						isInBlockComment &= pos <= 0 || data.Document.GetCharAt (pos - 1) != '*';
-					} else if (!isInString && !isInChar && pos + 1 < max) {
-						char nextChar = data.Document.GetCharAt (pos + 1);
-						if (nextChar == '/') {
-							outOffset = lastNonWsOffset;
-							return true;
-						}
-						if (!isInLineComment && nextChar == '*') {
-							outOffset = lastNonWsOffset;
-							return true;
-						}
-					}
-					break;
-				case '\\':
-					if (isInChar || (isInString && !isVerbatimString))
-						pos++;
-					break;
-				case '@':
-					if (!(isInString || isInChar || isInLineComment || isInBlockComment) && pos + 1 < max && data.Document.GetCharAt (pos + 1) == '"') {
-						isInString = true;
-						isVerbatimString = true;
-						pos++;
-					}
-					break;
-				case '"':
-					if (!(isInChar || isInLineComment || isInBlockComment)) {
-						if (isInString && isVerbatimString && pos + 1 < max && data.Document.GetCharAt (pos + 1) == '"') {
-							pos++;
-						} else {
-							isInString = !isInString;
-							isVerbatimString = false;
-						}
-					}
-					break;
-				case '\'':
-					if (!(isInString || isInLineComment || isInBlockComment))
-						isInChar = !isInChar;
-					break;
+			var offset = curLine.Offset;
+			string lineText = data.GetTextAt (caretOffset, max - caretOffset);
+			var lexer = new CSharpCompletionEngineBase.MiniLexer (lineText);
+			lexer.Parse ((ch, i) => {
+				if (lexer.IsInSingleComment || lexer.IsInMultiLineComment)
+					return true;
+				if (ch == '}' && lexer.IsFistNonWs && !IsSemicolonalreadyPlaced (data, caretOffset)) {
+					lastNonWsChar = ';';
+					return true;
 				}
 				if (!char.IsWhiteSpace (ch)) {
-					firstChar = false;
-					lastNonWsOffset = pos;
+					lastNonWsOffset = caretOffset + i;
 					lastNonWsChar = ch;
 				}
-			}
+				return false;
+			}); 
 			// if the line ends with ';' the line end is not the correct place for a new semicolon.
 			if (lastNonWsChar == ';')
 				return false;
@@ -817,6 +778,10 @@ namespace MonoDevelop.CSharp.Formatting
 			SafeUpdateIndentEngine (cursor);
 			if (stateTracker.LineBeganInsideVerbatimString || stateTracker.LineBeganInsideMultiLineComment)
 				return;
+			if (DefaultSourceEditorOptions.Instance.IndentStyle == IndentStyle.Auto) {
+				textEditorData.FixVirtualIndentation ();
+				return;
+			}
 			var line = textEditorData.Document.GetLineByOffset (cursor);
 
 			// Get context to the end of the line w/o changing the main engine's state

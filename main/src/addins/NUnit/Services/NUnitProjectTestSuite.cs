@@ -55,7 +55,7 @@ namespace MonoDevelop.NUnit
 		{
 			storeId = Path.GetFileName (project.FileName);
 			resultsPath = MonoDevelop.NUnit.RootTest.GetTestResultsDirectory (project.BaseDirectory);
-			ResultsStore = new XmlResultsStore (resultsPath, storeId);
+			ResultsStore = new BinaryResultsStore (resultsPath, storeId);
 			this.project = project;
 			project.NameChanged += new SolutionItemRenamedEventHandler (OnProjectRenamed);
 			IdeApp.ProjectOperations.EndBuild += new BuildEventHandler (OnProjectBuilt);
@@ -63,8 +63,11 @@ namespace MonoDevelop.NUnit
 		
 		public static NUnitProjectTestSuite CreateTest (DotNetProject project)
 		{
+			if (!project.ParentSolution.GetConfiguration (IdeApp.Workspace.ActiveConfiguration).BuildEnabledForItem (project))
+				return null;
+
 			foreach (var p in project.References)
-				if (p.Reference.IndexOf ("GuiUnit", StringComparison.OrdinalIgnoreCase) != -1 || p.Reference.IndexOf ("nunit.framework") != -1 || p.Reference.IndexOf ("nunit.core") != -1)
+				if (p.Reference.IndexOf ("GuiUnit", StringComparison.OrdinalIgnoreCase) != -1 || p.Reference.IndexOf ("nunit.framework") != -1 || p.Reference.IndexOf ("nunit.core") != -1 || p.Reference.IndexOf ("nunitlite") != -1)
 					return new NUnitProjectTestSuite (project);
 			return null;
 		}

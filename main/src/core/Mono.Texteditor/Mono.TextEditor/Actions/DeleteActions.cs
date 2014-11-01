@@ -28,6 +28,7 @@
 //
 
 using System;
+using ICSharpCode.NRefactory;
 
 
 namespace Mono.TextEditor
@@ -136,6 +137,12 @@ namespace Mono.TextEditor
 			if (data.Document.LineCount <= 1 || !data.CanEdit (data.Caret.Line))
 				return;
 			using (var undo = data.OpenUndoGroup ()) {
+				if (data.IsSomethingSelected) {
+					var startLine = data.GetLine (data.MainSelection.Start.Line);
+					var endLine = data.GetLine (data.MainSelection.End.Line);
+					data.Remove (startLine.Offset, endLine.EndOffsetIncludingDelimiter - startLine.Offset);
+					return;
+				} 
 				var start = GetStartOfLineOffset (data, data.Caret.Location);
 				var end = GetEndOfLineOffset (data, data.Caret.Location);
 				data.Remove (start, end - start);
@@ -282,7 +289,7 @@ namespace Mono.TextEditor
 					if (data.Caret.Line < data.Document.LineCount) { 
 						data.Remove (line.EndOffsetIncludingDelimiter - line.DelimiterLength, line.DelimiterLength);
 						if (line.EndOffsetIncludingDelimiter == data.Document.TextLength)
-							line.DelimiterLength = 0;
+							line.UnicodeNewline = UnicodeNewline.Unknown;
 					}
 				} else {
 					data.Remove (data.Caret.Offset, 1); 

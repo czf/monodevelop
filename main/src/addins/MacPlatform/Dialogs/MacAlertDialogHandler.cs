@@ -36,6 +36,7 @@ using MonoDevelop.Ide;
 using MonoDevelop.Ide.Extensions;
 using MonoDevelop.Components.Extensions;
 using MonoDevelop.MacInterop;
+using MonoDevelop.Components;
 	
 namespace MonoDevelop.MacIntegration
 {
@@ -46,17 +47,21 @@ namespace MonoDevelop.MacIntegration
 			using (var alert = new NSAlert ()) {
 				alert.Window.Title = data.Title ?? BrandingService.ApplicationName;
 
-				if (data.Message.Icon == MonoDevelop.Ide.Gui.Stock.Information) {
+				bool stockIcon = false;
+				if (data.Message.Icon == MonoDevelop.Ide.Gui.Stock.Error || data.Message.Icon == Gtk.Stock.DialogError) {
 					alert.AlertStyle = NSAlertStyle.Critical;
-				} else if (data.Message.Icon == MonoDevelop.Ide.Gui.Stock.Warning) {
-					alert.AlertStyle = NSAlertStyle.Warning;
-				} else { //if (data.Message.Icon == MonoDevelop.Ide.Gui.Stock.Information) {
+					stockIcon = true;
+				} else if (data.Message.Icon == MonoDevelop.Ide.Gui.Stock.Warning || data.Message.Icon == Gtk.Stock.DialogWarning) {
+					alert.AlertStyle = NSAlertStyle.Critical;
+					stockIcon = true;
+				} else {
 					alert.AlertStyle = NSAlertStyle.Informational;
+					stockIcon = data.Message.Icon == MonoDevelop.Ide.Gui.Stock.Information;
 				}
 				
 				//FIXME: use correct size so we don't get horrible scaling?
-				if (!string.IsNullOrEmpty (data.Message.Icon)) {
-					var pix = ImageService.GetPixbuf (data.Message.Icon, Gtk.IconSize.Dialog);
+				if (!stockIcon && !string.IsNullOrEmpty (data.Message.Icon)) {
+					var pix = ImageService.GetIcon (data.Message.Icon, Gtk.IconSize.Dialog).ToPixbuf();
 					byte[] buf = pix.SaveToBuffer ("tiff");
 					unsafe {
 						fixed (byte* b = buf) {
@@ -67,7 +72,7 @@ namespace MonoDevelop.MacIntegration
 					//for some reason the NSAlert doesn't pick up the app icon by default
 					alert.Icon = NSApplication.SharedApplication.ApplicationIconImage;
 				}
-				
+
 				alert.MessageText = data.Message.Text;
 				alert.InformativeText = data.Message.SecondaryText ?? "";
 				
@@ -85,6 +90,7 @@ namespace MonoDevelop.MacIntegration
 					}
 				}
 				
+				var wrappers = new List<AlertButtonWrapper> (buttons.Count);
 				foreach (var button in buttons) {
 					var label = button.Label;
 					if (button.IsStockButton)
@@ -95,7 +101,11 @@ namespace MonoDevelop.MacIntegration
 					if (button == AlertButton.CloseWithoutSave)
 						label = GettextCatalog.GetString ("Don't Save");
 
-					alert.AddButton (label);
+					var nsbutton = alert.AddButton (label);
+					var wrapperButton = new AlertButtonWrapper (nsbutton, data.Message, button, alert);
+					wrappers.Add (wrapperButton);
+					nsbutton.Target = wrapperButton;
+					nsbutton.Action = new MonoMac.ObjCRuntime.Selector ("buttonActivatedAction:");
 				}
 				
 				
@@ -172,6 +182,31 @@ namespace MonoDevelop.MacIntegration
 			}
 			
 			return true;
+		}
+	}
+
+	class AlertButtonWrapper : NSObject
+	{
+		readonly NSButton nsbutton;
+		readonly MessageDescription message;
+		readonly AlertButton alertButton;
+		readonly MonoMac.ObjCRuntime.Selector oldAction;
+		readonly NSAlert alert;
+		public AlertButtonWrapper (NSButton nsbutton, MessageDescription message, AlertButton alertButton, NSAlert alert)
+		{
+			this.nsbutton = nsbutton;
+			this.message = message;
+			this.alertButton = alertButton;
+			this.alert = alert;
+			oldAction = nsbutton.Action;
+		}
+
+		[Export ("buttonActivatedAction:")]
+		void ButtonActivatedAction ()
+		{
+			bool close = message.NotifyClicked (alertButton);
+			if (close)
+				nsbutton.SendAction (oldAction, alert);
 		}
 	}
 }

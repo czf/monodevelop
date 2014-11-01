@@ -175,7 +175,7 @@ namespace MonoDevelop.CSharp.Refactoring.CodeActions
 				MDRefactoringScript script;
 
 				if (loadedDocument.Editor != context.TextEditor) {
-					script = new MDRefactoringScript (MDRefactoringContext.Create (loadedDocument, loc, context.CancellationToken), FormattingOptions);
+					script = new MDRefactoringScript (MDRefactoringContext.Create (loadedDocument, loc, context.CancellationToken).Result, FormattingOptions);
 					startedScripts.Add (script);
 				} else {
 					script = this;
@@ -269,7 +269,11 @@ namespace MonoDevelop.CSharp.Refactoring.CodeActions
 			if (operationsRunning-- == 0) {
 				isDisposed = true;
 				undoGroup.Dispose ();
-				base.Dispose ();
+				try {
+					base.Dispose ();
+				} catch (Exception e) {
+					LoggingService.LogError ("Error while disposing refactoring script", e);
+				}
 			}
 			foreach (var script in startedScripts)
 				script.Dispose ();
@@ -352,7 +356,7 @@ namespace MonoDevelop.CSharp.Refactoring.CodeActions
 				insertLocation = content.Length;
 			content = content.Substring (0, insertLocation) + newType.ToString (FormattingOptions) + content.Substring (insertLocation);
 
-			var project = context.Project;
+			var project = context.FileContainerProject;
 			if (project != null) {
 				var policy = project.Policies.Get<CSharpFormattingPolicy> ();
 				var textPolicy = project.Policies.Get<TextStylePolicy> ();

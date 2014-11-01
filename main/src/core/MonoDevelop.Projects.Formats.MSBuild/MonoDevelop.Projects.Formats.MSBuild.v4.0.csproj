@@ -3,7 +3,7 @@
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">x86</Platform>
-    <ProductVersion>9.0.21022</ProductVersion>
+    <ProductVersion>8.0.30703</ProductVersion>
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{B257A1A3-78DF-4F00-8053-D32A8B1EB679}</ProjectGuid>
     <OutputType>WinExe</OutputType>
@@ -43,7 +43,6 @@
     <Compile Include="Main.cs" />
     <Compile Include="AssemblyInfo.cs" />
     <Compile Include="MonoDevelop.Projects.Formats.MSBuild\ProjectBuilder.cs" />
-    <Compile Include="MonoDevelop.Projects.Formats.MSBuild\MSBuildResult.cs" />
     <Compile Include="MonoDevelop.Projects.Formats.MSBuild\LocalLogger.cs" />
     <Compile Include="MonoDevelop.Projects.Formats.MSBuild\ILogWriter.cs" />
     <Compile Include="MonoDevelop.Projects.Formats.MSBuild\IProjectBuilder.cs" />
@@ -51,6 +50,9 @@
     <Compile Include="MonoDevelop.Projects.Formats.MSBuild\IBuildEngine.cs" />
     <Compile Include="MonoDevelop.Projects.Formats.MSBuild\ConsoleLogger.cs" />
     <Compile Include="AssemblyInfo.v4.0.cs" />
+    <Compile Include="MonoDevelop.Projects.Formats.MSBuild\MSBuildTargetResult.cs" />
+    <Compile Include="MonoDevelop.Projects.Formats.MSBuild\MSBuildResult.cs" />
+    <Compile Include="MonoDevelop.Projects.Formats.MSBuild\MSBuildEvaluatedItem.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
   <ItemGroup>

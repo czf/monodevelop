@@ -48,7 +48,7 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 		readonly ManualResetEvent doneEvent = new ManualResetEvent (false);
 		readonly Dictionary<string, string> unsavedProjects = new Dictionary<string, string> ();
 
-		ProjectCollection engine;
+		readonly ProjectCollection engine = new ProjectCollection { DefaultToolsVersion = MSBuildConsts.Version };
 
 		public void Dispose ()
 		{
@@ -59,10 +59,19 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 			get { return doneEvent; }
 		}
 
-		public void Initialize (string solutionFile, CultureInfo uiCulture)
+		public void Ping ()
+		{
+		}
+
+		public void SetCulture (CultureInfo uiCulture)
 		{
 			BuildEngine.uiCulture = uiCulture;
-			engine = InitializeEngine (solutionFile);
+		}
+
+		public void SetGlobalProperties (IDictionary<string, string> properties)
+		{
+			foreach (var p in properties)
+				engine.SetGlobalProperty (p.Key, p.Value);
 		}
 
 		public IProjectBuilder LoadProject (string file)
@@ -96,30 +105,6 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 			return null;
 		}
 
-		static ProjectCollection InitializeEngine (string slnFile)
-		{
-			var engine = new ProjectCollection ();
-			engine.DefaultToolsVersion = MSBuildConsts.Version;
-
-			//this causes build targets to behave how they should inside an IDE, instead of in a command-line process
-			engine.SetGlobalProperty ("BuildingInsideVisualStudio", "true");
-
-			//we don't have host compilers in MD, and this is set to true by some of the MS targets
-			//which causes it to always run the CoreCompile task if BuildingInsideVisualStudio is also
-			//true, because the VS in-process compiler would take care of the deps tracking
-			engine.SetGlobalProperty ("UseHostCompilerIfAvailable", "false");
-
-			if (string.IsNullOrEmpty (slnFile))
-				return engine;
-
-			engine.SetGlobalProperty ("SolutionPath", Path.GetFullPath (slnFile));
-			engine.SetGlobalProperty ("SolutionName", Path.GetFileNameWithoutExtension (slnFile));
-			engine.SetGlobalProperty ("SolutionFilename", Path.GetFileName (slnFile));
-			engine.SetGlobalProperty ("SolutionDir", Path.GetDirectoryName (slnFile) + Path.DirectorySeparatorChar);
-
-			return engine;
-		}
-
 		internal void UnloadProject (string file)
 		{
 			lock (unsavedProjects)
@@ -127,26 +112,10 @@ namespace MonoDevelop.Projects.Formats.MSBuild
 
 			RunSTA (delegate
 			{
-				//unloading projects modifies the collection, so copy it
-				var projects = engine.GetLoadedProjects (file).ToArray ();
-
-				if (projects.Length == 0) {
-					return;
-				}
-
-				var rootElement = projects[0].Xml;
-
-				foreach (var p in projects) {
-					engine.UnloadProject (p);
-				}
-
-				//try to unload the projects' XML from the cache
-				try {
-					engine.UnloadProject (rootElement);
-				} catch (InvalidOperationException) {
-					// This could fail if something else is referencing the xml somehow.
-					// But not a big deal, it's just a cache.
-				}
+				// Unloading the project file is not enough because the project
+				// may be referencing other target files which may have
+				// changed and which are cached.
+				engine.UnloadAllProjects();
 			});
 		}
 
