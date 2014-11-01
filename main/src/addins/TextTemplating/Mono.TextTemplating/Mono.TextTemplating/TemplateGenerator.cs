@@ -30,7 +30,7 @@ using System.CodeDom.Compiler;
 using System.IO;
 using System.Text;
 using Microsoft.VisualStudio.TextTemplating;
-
+using Mono.Cecil;
 namespace Mono.TextTemplating
 {
 	public class TemplateGenerator : MarshalByRefObject, ITextTemplatingEngineHost
@@ -198,10 +198,9 @@ namespace Mono.TextTemplating
 		//FIXME: implement
 		protected virtual string ResolveAssemblyReference (string assemblyReference)
 		{
-			//foreach (string referencePath in ReferencePaths) {
-			//	
-			//}
-			return assemblyReference;
+			DefaultAssemblyResolver resolver = new DefaultAssemblyResolver();
+			AssemblyDefinition def = resolver.Resolve(assemblyReference);
+			return def.MainModule.ToString();
 		}
 		
 		protected virtual string ResolveParameterValue (string directiveId, string processorName, string parameterName)
